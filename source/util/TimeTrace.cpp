@@ -21,8 +21,6 @@ using namespace std::chrono;
 
 namespace slang {
 
-std::unique_ptr<TimeTrace::Profiler> TimeTrace::profiler = nullptr;
-
 using DurationType = duration<steady_clock::rep, steady_clock::period>;
 
 static std::string escapeString(std::string_view src) {
@@ -124,6 +122,8 @@ struct TimeTrace::Profiler {
         os << "] }\n";
     }
 };
+
+std::unique_ptr<TimeTrace::Profiler> TimeTrace::profiler = nullptr;
 
 thread_local std::vector<Entry> TimeTrace::Profiler::stack;
 
