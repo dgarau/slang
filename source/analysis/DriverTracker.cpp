@@ -378,6 +378,11 @@ const HierarchicalReference* DriverTracker::addDriver(
     AnalysisContext& context, DriverAlloc& driverAlloc, const ValueSymbol& symbol,
     SymbolDriverMap& driverMap, const ValueDriver& driver, DriverBitRange bounds) {
 
+    // Class types don't have drivers, so we can skip this.
+    if (symbol.getDeclaredType()->getType().isClass()) {
+        return nullptr;
+    }
+
     auto scope = symbol.getParentScope();
     SLANG_ASSERT(scope);
 
