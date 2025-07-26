@@ -117,13 +117,18 @@ const fs::path& SourceManager::getFullPath(BufferID buffer) const {
     return info->data->fullPath;
 }
 
-SourceLocation SourceManager::getIncludedFrom(BufferID buffer) const {
-    std::shared_lock<std::shared_mutex> lock(mutex);
+template<IsLock TLock>
+SourceLocation SourceManager::getIncludedFromImpl(BufferID buffer, TLock& lock) const {
     auto info = getFileInfo(buffer, lock);
     if (!info)
         return SourceLocation();
 
     return info->includedFrom;
+}
+
+SourceLocation SourceManager::getIncludedFrom(BufferID buffer) const {
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    return getIncludedFromImpl(buffer, lock);
 }
 
 const SourceLibrary* SourceManager::getLibraryFor(BufferID buffer) const {
@@ -170,8 +175,26 @@ bool SourceManager::isMacroArgLoc(SourceLocation location) const {
     return isMacroArgLocImpl(location, lock);
 }
 
+template<IsLock TLock>
+bool SourceManager::isIncludedFileLocImpl(SourceLocation location, TLock& lock) const {
+    if (location.buffer() == SourceLocation::NoLocation.buffer())
+        return false;
+
+    auto buffer = location.buffer();
+    if (!buffer)
+        return false;
+
+    SLANG_ASSERT(buffer.getId() < bufferEntries.size());
+    auto info = std::get_if<ExpansionInfo>(&bufferEntries[buffer.getId()]);
+    if (info) {
+        return isIncludedFileLocImpl(info->expansionRange.start(), lock);
+    }
+    return getIncludedFromImpl(location.buffer(), lock).valid();
+}
+
 bool SourceManager::isIncludedFileLoc(SourceLocation location) const {
-    return getIncludedFrom(location.buffer()).valid();
+    std::shared_lock<std::shared_mutex> lock(mutex);
+    return isIncludedFileLocImpl(location, lock);
 }
 
 bool SourceManager::isPreprocessedLoc(SourceLocation location) const {
@@ -483,7 +506,7 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
     // If no sort key is provided we use the bufferID, but shifted up
     // so that the bottom 32 bits are reserved for custom sort keys.
     if (sortKey == UINT64_MAX)
-        sortKey = bufferEntries.size() << 32;
+        sortKey = (uint64_t)bufferEntries.size() << 32;
 
     bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
     return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library,

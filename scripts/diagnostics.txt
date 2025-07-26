@@ -1150,6 +1150,7 @@ error MultipleUDNTDrivers "net '{}' with user-defined nettype '{}' cannot have m
 error InputPortAssign "cannot assign to input port '{}'"
 error ClockVarTargetAssign "cannot write to '{}' with a continuous assignment since it's associated with an output clocking signal"
 error LocalFormalVarMultiAssign "cannot bind local variable '{}' to more than one output or inout local variable formal argument"
+error AlwaysWithoutTimingControl "'always' procedure does not advance time and so will create a simulation deadlock"
 note NoteRequiredHere "required here"
 note NoteClockHere "clock here"
 warning unused-def UnusedDefinition "{} definition is unused"
@@ -1172,6 +1173,7 @@ warning unused-assertion-decl UnusedAssertionDecl "unused {} '{}'"
 warning unused-import UnusedImport "unused import '{}'"
 warning unused-wildcard-import UnusedWildcardImport "unused wildcard import"
 warning inferred-latch InferredLatch "latch inferred for '{}' because it is not assigned on all control paths"
+warning inferred-comb InferredComb "combinational logic inferred for '{}' because it is assigned on all control paths"
 warning incomplete-return IncompleteReturn "non-void function '{}' does not return a value on all control paths"
 warning missing-return MissingReturn "non-void function '{}' does not return a value"
 warning case-enum CaseEnum "enumeration {} not handled in case statement"
@@ -1217,7 +1219,7 @@ group extra = { empty-member empty-stmt dup-import pointless-void-cast case-gen-
                 float-narrow bitwise-rel-precedence arith-in-shift logical-not-parentheses
                 consecutive-comparison case-outside-range case-enum case-dup case-overlap
                 case-unreachable incomplete-return missing-return case-redundant-default case-incomplete
-                case-wildcard-2state }
+                case-wildcard-2state inferred-latch inferred-comb }
 
 group pedantic = { empty-pattern implicit-net-port nonstandard-escape-code nonstandard-generate format-multibit-strength
                    nonstandard-sys-func nonstandard-foreach nonstandard-dist isunbounded-param-arg udp-coverage }
