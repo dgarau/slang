@@ -14,6 +14,10 @@
 @brief Expression definitions
 */
 
+/** @dir include/slang/ast/statements
+@brief Statement definitions
+*/
+
 /** @dir include/slang/ast/symbols
 @brief Symbol definitions
 */
@@ -66,7 +70,7 @@
 @brief The SystemVerilog AST
 */
 
-/** @namespace slang::::SFormat
+/** @namespace slang::ast::SFormat
 @brief Utility methods for formatting strings using SystemVerilog formatting styles
 */
 

@@ -28,8 +28,8 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 include(gitversion)
 get_git_version(SLANG_VERSION_PATCH SLANG_VERSION_HASH)
 
-set(SLANG_VERSION_MAJOR 8)
-set(SLANG_VERSION_MINOR 1)
+set(SLANG_VERSION_MAJOR 9)
+set(SLANG_VERSION_MINOR 0)
 set(SLANG_VERSION_STRING
     "${SLANG_VERSION_MAJOR}.${SLANG_VERSION_MINOR}.${SLANG_VERSION_PATCH}")
 message(STATUS "slang version: ${SLANG_VERSION_STRING}+${SLANG_VERSION_HASH}")
@@ -61,6 +61,8 @@ option(SLANG_INCLUDE_TESTS "Include test targets in the build"
        ${SLANG_MASTER_PROJECT})
 option(SLANG_INCLUDE_DOCS "Include documentation targets in the build" OFF)
 option(SLANG_INCLUDE_PYLIB "Include the pyslang python module in the build" OFF)
+option(SLANG_INCLUDE_PYTHON_DOCS
+       "Include Python binding documentation in the build" OFF)
 option(SLANG_INCLUDE_INSTALL "Include installation targets"
        ${SLANG_MASTER_PROJECT})
 option(SLANG_INCLUDE_COVERAGE "Enable code coverage" OFF)
@@ -70,6 +72,7 @@ option(SLANG_CI_BUILD "Enable longer running tests for CI builds" OFF)
 option(SLANG_FUZZ_TARGET "Enables changes to make binaries easier to fuzz test"
        OFF)
 option(BUILD_SHARED_LIBS "Generate shared libraries instead of static" OFF)
+option(SLANG_USE_THREADS "Enable use of threads" ON)
 option(SLANG_USE_MIMALLOC "Enable use of the mimalloc library" ON)
 option(SLANG_USE_CPPTRACE "Enable use of the cpptrace library" OFF)
 
@@ -146,10 +149,26 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "WASI")
+  add_compile_options(-fno-exceptions)
+
   add_compile_definitions(_WASI_EMULATED_SIGNAL)
   add_link_options(-lwasi-emulated-signal)
+  set(CATCH_CONFIG_NO_POSIX_SIGNALS ON)
+
   # https://github.com/fmtlib/fmt/issues/4496#issuecomment-3094630184
   add_compile_definitions(FMT_USE_FCNTL=0)
+
+  # to make stack overflows crash instead of silently corrupt memory
+  add_link_options(-Wl,--stack-first -Wl,-z,stack-size=1048576)
+
+  # required for growable memory in multithreaded builds
+  add_link_options(-Wl,--max-memory=4294967296)
+
+  # to have CTest invoke a Wasm engine when running tests
+  set(mappings --dir=/ --dir=${CMAKE_CURRENT_SOURCE_DIR}/tests::tests)
+  set(CMAKE_TEST_LAUNCHER
+      wasmtime run -S threads ${mappings}
+      CACHE STRING "")
 endif()
 
 if(SLANG_FUZZ_TARGET)
