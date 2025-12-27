@@ -27,7 +27,7 @@ public:
 
     /// Sets the engine that this client is associated with.
     /// This is called by the engine when the client is added to it.
-    void setEngine(const DiagnosticEngine& engine);
+    virtual void setEngine(const DiagnosticEngine& engine);
 
     /// Sets whether displayed filenames for diagnostics should be
     /// made absolute, or whether to use the relative path.
