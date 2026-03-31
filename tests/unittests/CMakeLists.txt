@@ -49,6 +49,7 @@ add_executable(
   util/UtilTests.cpp
   DriverTests.cpp
   FileTests.cpp
+  UpdateSourceTests.cpp
   main.cpp
   Test.cpp)
 

@@ -424,6 +424,48 @@ SourceBuffer SourceManager::assignBuffer(std::string_view bufferPath, SmallVecto
                        std::move(buffer));
 }
 
+SourceBuffer SourceManager::updateSource(const fs::path& path, std::string_view text,
+                                         uint64_t sortKey) {
+    fs::path absPath;
+    if (!disableProximatePaths) {
+        std::error_code ec;
+        absPath = fs::weakly_canonical(path, ec);
+        if (ec)
+            absPath = path;
+    }
+    else {
+        absPath = path;
+    }
+
+    std::string pathStr = getU8Str(absPath);
+    std::unique_lock<std::shared_mutex> lock(mutex);
+
+    std::string name;
+    if (!disableProximatePaths) {
+        std::error_code ec;
+        name = getU8Str(fs::proximate(absPath, ec));
+        if (ec)
+            name = {};
+    }
+
+    if (name.empty())
+        name = getU8Str(absPath.filename());
+
+    auto directory = &*directories.insert(absPath.parent_path()).first;
+
+    SmallVector<char> buffer;
+    buffer.insert(buffer.end(), text.begin(), text.end());
+    if (buffer.empty() || buffer.back() != '\0')
+        buffer.push_back('\0');
+
+    auto fd = std::make_shared<FileData>(directory, std::move(name), std::move(buffer),
+                                         std::move(absPath));
+
+    lookupCache.insert_or_assign(pathStr, std::pair{fd, std::error_code{}});
+
+    return createBufferEntry(std::move(fd), SourceLocation(), nullptr, sortKey, lock);
+}
+
 SourceManager::BufferOrError SourceManager::readSource(const fs::path& path,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
@@ -572,7 +614,8 @@ const SourceManager::FileInfo* SourceManager::getFileInfo(BufferID buffer, TLock
     return std::get_if<FileInfo>(&bufferEntries[buffer.getId()]);
 }
 
-SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation includedFrom,
+SourceBuffer SourceManager::createBufferEntry(std::shared_ptr<FileData> fd,
+                                              SourceLocation includedFrom,
                                               const SourceLibrary* library, uint64_t sortKey,
                                               std::unique_lock<std::shared_mutex>&) {
     SLANG_ASSERT(fd);
@@ -582,9 +625,10 @@ SourceBuffer SourceManager::createBufferEntry(FileData* fd, SourceLocation inclu
     if (sortKey == UINT64_MAX)
         sortKey = (uint64_t)bufferEntries.size() << 32;
 
-    bufferEntries.emplace_back(FileInfo(fd, library, includedFrom, sortKey));
-    return SourceBuffer{std::string_view(fd->mem.data(), fd->mem.size()), library,
-                        BufferID((uint32_t)(bufferEntries.size() - 1), fd->name)};
+    std::string_view name = fd->name;
+    std::string_view mem(fd->mem.data(), fd->mem.size());
+    bufferEntries.emplace_back(FileInfo(std::move(fd), library, includedFrom, sortKey));
+    return SourceBuffer{mem, library, BufferID((uint32_t)(bufferEntries.size() - 1), name)};
 }
 
 bool SourceManager::isCached(const fs::path& path) const {
@@ -630,7 +674,7 @@ SourceManager::BufferOrError SourceManager::openCached(const fs::path& fullPath,
                 return nonstd::make_unexpected(ec);
 
             SLANG_ASSERT(fd);
-            return createBufferEntry(fd.get(), includedFrom, library, sortKey, lock);
+            return createBufferEntry(fd, includedFrom, library, sortKey, lock);
         }
     }
 
@@ -663,7 +707,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     std::unique_lock<std::shared_mutex> lock(mutex);
 
     auto directory = &*directories.insert(path.parent_path()).first;
-    auto fd = std::make_unique<FileData>(directory, std::move(name), std::move(buffer),
+    auto fd = std::make_shared<FileData>(directory, std::move(name), std::move(buffer),
                                          std::move(path));
 
     // Note: it's possible that insertion here fails due to another thread
@@ -674,8 +718,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
     // first place).
     auto [it, inserted] = lookupCache.emplace(pathStr, std::pair{std::move(fd), std::error_code{}});
 
-    FileData* fdPtr = it->second.first.get();
-    return createBufferEntry(fdPtr, includedFrom, library, sortKey, lock);
+    return createBufferEntry(it->second.first, includedFrom, library, sortKey, lock);
 }
 
 template<IsLock TLock>
@@ -689,7 +732,7 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
         if (!info || !info->data)
             return 0;
 
-        fd = info->data;
+        fd = info->data.get();
     }
 
     if (fd->lineOffsets.empty()) {

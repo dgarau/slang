@@ -209,6 +209,11 @@ public:
                              const SourceLibrary* library, bool isSystemPath,
                              std::span<std::filesystem::path const> additionalIncludePaths);
 
+    /// Update the source text for a given file.
+    /// This creates a new buffer ID for the file.
+    SourceBuffer updateSource(const std::filesystem::path& path, std::string_view text,
+                              uint64_t sortKey = UINT64_MAX);
+
     /// Returns true if the given file path is already loaded and cached in the source manager.
     bool isCached(const std::filesystem::path& path) const;
 
@@ -299,7 +304,7 @@ private:
     // Stores a pointer to file data along with information about where we included it.
     // There can potentially be many of these for a given file.
     struct FileInfo {
-        FileData* data = nullptr;
+        std::shared_ptr<FileData> data = nullptr;
         const SourceLibrary* library = nullptr;
         SourceLocation includedFrom;
         uint64_t sortKey = 0;
@@ -308,9 +313,9 @@ private:
 
         FileInfo() {}
 
-        FileInfo(FileData* data, const SourceLibrary* library, SourceLocation includedFrom,
+        FileInfo(std::shared_ptr<FileData> data, const SourceLibrary* library, SourceLocation includedFrom,
                  uint64_t sortKey) :
-            data(data), library(library), includedFrom(includedFrom), sortKey(sortKey),
+            data(std::move(data)), library(library), includedFrom(includedFrom), sortKey(sortKey),
             bufferKind(includedFrom.valid() ? BufferKind::IncludeFile : BufferKind::DesignFile) {}
 
         // Returns a pointer to the LineDirectiveInfo for the nearest enclosing
@@ -352,7 +357,7 @@ private:
     std::vector<std::variant<FileInfo, ExpansionInfo>> bufferEntries;
 
     // cache for file lookups; this holds on to the actual file data
-    flat_hash_map<std::string, std::pair<std::unique_ptr<FileData>, std::error_code>> lookupCache;
+    flat_hash_map<std::string, std::pair<std::shared_ptr<FileData>, std::error_code>> lookupCache;
 
     // directories for system and user includes
     std::vector<std::filesystem::path> systemDirectories;
@@ -380,7 +385,7 @@ private:
     template<IsLock TLock>
     const FileInfo* getFileInfo(BufferID buffer, TLock& lock) const;
 
-    SourceBuffer createBufferEntry(FileData* fd, SourceLocation includedFrom,
+    SourceBuffer createBufferEntry(std::shared_ptr<FileData> fd, SourceLocation includedFrom,
                                    const SourceLibrary* library, uint64_t sortKey,
                                    std::unique_lock<std::shared_mutex>& lock);
 
