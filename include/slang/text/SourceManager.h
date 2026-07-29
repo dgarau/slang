@@ -220,6 +220,30 @@ public:
     SourceBuffer updateSource(const std::filesystem::path& path, std::string_view text,
                               uint64_t sortKey = UINT64_MAX);
 
+    /// @brief Releases this buffer's claim on its source text.
+    ///
+    /// Every call to @a updateSource appends a buffer entry that holds a full
+    /// copy of the file text, and buffer entries are never removed -- their ID
+    /// is their index, so erasing one would renumber every later buffer and
+    /// invalidate every SourceLocation already handed out. An editor that
+    /// reparses on each keystroke therefore accumulates one copy of the file
+    /// per edit for the lifetime of the manager.
+    ///
+    /// This lets the owner of a superseded revision say that it is done with
+    /// it. The entry itself remains, so all existing IDs and locations stay
+    /// valid; only the text is dropped, and only once every other holder --
+    /// the lookup cache, which keeps the newest revision of a path, and any
+    /// other entry sharing the same file data -- has let go as well.
+    ///
+    /// Retiring a buffer that something is still reading is safe but wrong:
+    /// queries against it degrade to empty text, an empty file name and line
+    /// number zero rather than failing, so the caller must retire a revision
+    /// only once nothing can still resolve a location into it.
+    ///
+    /// @returns true if this entry held source text and released it; false if
+    ///          the buffer is not a file buffer or was already retired.
+    bool retireBuffer(BufferID buffer);
+
     /// Returns true if the given file path is already loaded and cached in the source manager.
     bool isCached(const std::filesystem::path& path) const;
 

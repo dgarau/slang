@@ -52,3 +52,50 @@ TEST_CASE("Update Source Tests") {
     // Cleanup
     fs::remove(path);
 }
+
+TEST_CASE("Retire Buffer Tests") {
+    SourceManager sm;
+    auto path = fs::temp_directory_path() / "retire_test_file.sv";
+
+    auto getText = [&](BufferID id) -> std::string_view {
+        auto txt = sm.getSourceText(id);
+        if (!txt.empty() && txt.back() == '\0')
+            txt.remove_suffix(1);
+        return txt;
+    };
+
+    SourceBuffer buffer1 = sm.assignText(path.string(), "module m; endmodule");
+    SourceBuffer buffer2 = sm.updateSource(path, "module n; endmodule");
+    CHECK(getText(buffer1.id) == "module m; endmodule");
+    CHECK(getText(buffer2.id) == "module n; endmodule");
+
+    // The superseded revision releases its text; the current one is untouched.
+    CHECK(sm.retireBuffer(buffer1.id));
+    CHECK(getText(buffer1.id).empty());
+    CHECK(getText(buffer2.id) == "module n; endmodule");
+
+    // Retiring is idempotent, and reports that there was nothing left to do.
+    CHECK(!sm.retireBuffer(buffer1.id));
+
+    // The entry survives as a tombstone, so later buffers keep their IDs and
+    // every location already handed out still refers to the same buffer.
+    SourceBuffer buffer3 = sm.updateSource(path, "module o; endmodule");
+    CHECK(buffer3.id != buffer1.id);
+    CHECK(buffer3.id != buffer2.id);
+    CHECK(getText(buffer2.id) == "module n; endmodule");
+    CHECK(getText(buffer3.id) == "module o; endmodule");
+
+    // Queries against a retired buffer degrade rather than fail.
+    CHECK(sm.getRawFileName(buffer1.id).empty());
+    CHECK(sm.getLineNumber(SourceLocation(buffer1.id, 0)) == 0);
+
+    // The lookup cache holds the newest revision of a path, so retiring that
+    // entry does not free the text and a re-read still finds it.
+    CHECK(sm.retireBuffer(buffer3.id));
+    auto buffer4 = sm.readSource(path, nullptr);
+    REQUIRE(buffer4);
+    CHECK(getText(buffer4->id) == "module o; endmodule");
+
+    // Expansion buffers are not file buffers and have nothing to retire.
+    CHECK(!sm.retireBuffer(BufferID()));
+}
