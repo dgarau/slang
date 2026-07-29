@@ -490,6 +490,24 @@ SourceBuffer SourceManager::updateSource(const fs::path& path, std::string_view 
     return createBufferEntry(std::move(fd), SourceLocation(), nullptr, sortKey, lock);
 }
 
+bool SourceManager::retireBuffer(BufferID buffer) {
+    std::unique_lock<std::shared_mutex> lock(mutex);
+    auto info = getFileInfo(buffer, lock);
+    if (!info || !info->data)
+        return false;
+
+    // Drop only this entry's claim. The file data is shared -- the lookup cache
+    // holds the newest revision of every path, and openCached hands the same
+    // FileData to every entry it creates for a file -- so the text itself is
+    // freed here only when this was the last holder, which is exactly the case
+    // this is for: a revision superseded by a later edit.
+    //
+    // The entry is left in place as a tombstone rather than erased, because
+    // BufferID is its index in bufferEntries.
+    info->data.reset();
+    return true;
+}
+
 SourceManager::BufferOrError SourceManager::readSource(const fs::path& path,
                                                        const SourceLibrary* library,
                                                        uint64_t sortKey) {
@@ -768,7 +786,7 @@ SourceBuffer SourceManager::cacheBuffer(fs::path&& path, std::string&& pathStr,
 
 template<IsLock TLock>
 size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock) const {
-    FileData* fd;
+    std::shared_ptr<FileData> fd;
     {
         // Separate scope so that info isn't used after it may potentially
         // get invalidated when we briefly unloack a read lock and grab a
@@ -777,7 +795,11 @@ size_t SourceManager::getRawLineNumber(SourceLocation location, TLock& readLock)
         if (!info || !info->data)
             return 0;
 
-        fd = info->data.get();
+        // A copy of the shared_ptr, not a raw pointer: the read lock is
+        // released below, and retireBuffer could drop this entry's claim in
+        // that window. Holding a reference keeps the data alive for the rest
+        // of this call.
+        fd = info->data;
     }
 
     if (fd->lineOffsets.empty()) {
