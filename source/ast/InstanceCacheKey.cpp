@@ -33,10 +33,18 @@ InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
         if (param->isLocalParam())
             continue;
 
-        if (param->symbol.kind == SymbolKind::Parameter)
-            hash_combine(h, param->symbol.as<ParameterSymbol>().getValue().hash());
-        else
+        if (param->symbol.kind == SymbolKind::Parameter) {
+            // The parameter's type is hashed alongside its value: isIdentical (below) tells apart
+            // two integers of different width or signedness, but the declared or inferred type
+            // can still differ between values that are identical (a two-state and a four-state
+            // type of one width, say), and the body elaborates with that type.
+            auto& param_symbol = param->symbol.as<ParameterSymbol>();
+            hash_combine(h, param_symbol.getValue().hash());
+            hash_combine(h, param_symbol.getType().hash());
+        }
+        else {
             hash_combine(h, param->symbol.as<TypeParameterSymbol>().targetType.getType().hash());
+        }
     }
 
     for (auto conn : symbol.getPortConnections()) {
@@ -94,10 +102,16 @@ bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
 
         if (lp->symbol.kind == SymbolKind::Parameter) {
             // Values that compare equal can still behave differently in the body.
-            if (!lp->symbol.as<ParameterSymbol>().getValue().isIdentical(
-                    rp->symbol.as<ParameterSymbol>().getValue())) {
+            auto& lps = lp->symbol.as<ParameterSymbol>();
+            auto& rps = rp->symbol.as<ParameterSymbol>();
+            if (!lps.getValue().isIdentical(rps.getValue()))
                 return false;
-            }
+
+            // See the constructor for why the type is compared too.
+            auto& lpt = lps.getType();
+            auto& rpt = rps.getType();
+            if (!lpt.isMatchingAcrossElaborations(rpt) && !lpt.isIdenticalStructUnion(rpt))
+                return false;
         }
         else {
             auto& lt = lp->symbol.as<TypeParameterSymbol>().targetType.getType();
