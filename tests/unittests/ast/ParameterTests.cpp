@@ -1681,3 +1681,42 @@ endpackage
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::BodyParamNoInitializer);
 }
+
+TEST_CASE("Instances differing only in an implicit parameter's width are not cached together") {
+    // The value of an implicitly typed parameter does not, on its own, decide whether two instances
+    // can share an elaborated body. ConstantValue's hash bottoms out in SVInt::hash(), which hashes
+    // the raw data words and not the bit width, and its equality goes through exactlyEqual(), which
+    // width-extends before comparing -- so `2'b10` and `3'b010` hash alike and compare equal while
+    // giving the module a differently sized parameter. Sharing a body across that difference means
+    // one instance is elaborated with the other's widths.
+    auto tree = SyntaxTree::fromText(R"(
+module socket #(parameter ADDR = 0) ();
+endmodule
+
+module top;
+    socket #(3'b010) s0 ();
+    socket #(2'b10)  s1 ();
+    socket #(3'b010) s2 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    auto& s0 = root.lookupName<InstanceSymbol>("top.s0");
+    auto& s1 = root.lookupName<InstanceSymbol>("top.s1");
+    auto& s2 = root.lookupName<InstanceSymbol>("top.s2");
+
+    CHECK(s0.body.getParameters()[0]->symbol.as<ParameterSymbol>().getType().getBitWidth() == 3);
+    CHECK(s1.body.getParameters()[0]->symbol.as<ParameterSymbol>().getType().getBitWidth() == 2);
+
+    // s1 differs from s0 in width alone and must not be deduplicated onto it...
+    CHECK(s1.getCanonicalBody() == nullptr);
+
+    // ...while s2, which matches s0 exactly, still is -- the fix must not disable caching, only
+    // narrow it.
+    REQUIRE(s2.getCanonicalBody() != nullptr);
+    CHECK(s2.getCanonicalBody() == &s0.body);
+}
