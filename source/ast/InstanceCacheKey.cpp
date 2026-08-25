@@ -27,10 +27,21 @@ InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
     hash_combine(h, &symbol.getDefinition());
 
     for (auto param : symbol.body.getParameters()) {
-        if (param->symbol.kind == SymbolKind::Parameter)
-            hash_combine(h, param->symbol.as<ParameterSymbol>().getValue().hash());
-        else
+        if (param->symbol.kind == SymbolKind::Parameter) {
+            // The parameter's type is hashed alongside its value because the value alone does not
+            // distinguish two bodies that cannot share an elaboration. ConstantValue::hash()
+            // bottoms out in SVInt::hash(), which hashes the raw data words and not the bit width,
+            // so an implicitly typed `parameter P = 2'b10` and `parameter P = 3'b010` produce the
+            // same hash -- and ConstantValue's operator== then compares them equal, because
+            // exactlyEqual() width-extends before comparing. Two instances would share a body while
+            // disagreeing about how wide P is.
+            auto& param_symbol = param->symbol.as<ParameterSymbol>();
+            hash_combine(h, param_symbol.getValue().hash());
+            hash_combine(h, param_symbol.getType().hash());
+        }
+        else {
             hash_combine(h, param->symbol.as<TypeParameterSymbol>().targetType.getType().hash());
+        }
     }
 
     for (auto conn : symbol.getPortConnections()) {
@@ -85,10 +96,17 @@ bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
         SLANG_ASSERT(lp->symbol.kind == rp->symbol.kind);
 
         if (lp->symbol.kind == SymbolKind::Parameter) {
-            if (lp->symbol.as<ParameterSymbol>().getValue() !=
-                rp->symbol.as<ParameterSymbol>().getValue()) {
+            auto& lps = lp->symbol.as<ParameterSymbol>();
+            auto& rps = rp->symbol.as<ParameterSymbol>();
+            if (lps.getValue() != rps.getValue())
                 return false;
-            }
+
+            // See the constructor for why the type is compared too: ConstantValue's equality
+            // width-extends, so equal values do not imply interchangeable parameters.
+            auto& lpt = lps.getType();
+            auto& rpt = rps.getType();
+            if (!lpt.isMatching(rpt) && !lpt.isIdenticalStructUnion(rpt))
+                return false;
         }
         else {
             auto& lt = lp->symbol.as<TypeParameterSymbol>().targetType.getType();
