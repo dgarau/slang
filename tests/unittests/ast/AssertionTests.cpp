@@ -1843,3 +1843,24 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::AssertionExprType);
 }
+
+TEST_CASE("Sampled value functions allow omitted trailing arguments") {
+    // IEEE 1800-2023 16.9.3: every argument after the first may be omitted while its comma stays --
+    // $past's clocking event included, and the clocking event of $rose and its siblings.
+    auto tree = SyntaxTree::fromText(R"(
+module m(input clk, input [3:0] in);
+    default clocking @(posedge clk); endclocking
+    always @(posedge clk) begin
+        if (in != $past(in,)) $stop;
+        if (in != $past(in, 2,,)) $stop;
+        if (in != $past(in + 1, 2,,)) $stop;
+        if ($rose(in[0],)) $stop;
+        if ($stable(in,)) $stop;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
