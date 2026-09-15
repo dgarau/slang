@@ -369,7 +369,11 @@ Statement& ConcurrentAssertionStatement::fromSyntax(
     ASTContext ctx = context;
     ctx.clearSymbolCtx();
 
-    auto& prop = AssertionExpr::bind(*syntax.propertySpec, ctx);
+    auto& prop = AssertionExpr::bind(
+        *syntax.propertySpec, ctx,
+        assertKind == AssertionKind::CoverSequence
+            ? AssertionExpr::NondegeneracyRequirement::CoverSequence
+            : AssertionExpr::NondegeneracyRequirement::Default);
     bool bad = prop.bad();
 
     ctx.flags |= ASTFlags::ConcurrentAssertActionBlock;
