@@ -1069,6 +1069,27 @@ endmodule
     CHECK(diags[1].code == diag::SeqEmptyMatch);
 }
 
+TEST_CASE("Cover sequence may admit an empty match") {
+    // §16.12.22's nondegeneracy restrictions apply to a sequence used as a property;
+    // the sequence of a cover sequence statement is not one (§16.14.3).
+    auto tree = SyntaxTree::fromText(R"(
+module m(input clk, input a);
+    cover sequence (@(posedge clk) a[*0:$]);
+    cover sequence (@(posedge clk) a[*]);
+    assert property (@(posedge clk) a[*0:$]);
+    cover sequence (@(posedge clk) a ##1 1'b0);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::SeqEmptyMatch);
+    CHECK(diags[1].code == diag::SeqNoMatch);
+}
+
 TEST_CASE("Illegal property recursion cases") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
