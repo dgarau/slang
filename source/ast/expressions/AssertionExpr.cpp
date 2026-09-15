@@ -168,7 +168,7 @@ static void enforceNondegeneracy(const AssertionExpr& expr, const ASTContext& co
         if (seqNondegenSt.has(NondegeneracyStatus::AcceptsOnlyEmpty))
             context.addDiag(diag::SeqOnlyEmpty, syntax.sourceRange());
     }
-    else if (nondegRequirement != NR::NonOverlapOp) {
+    else if (nondegRequirement != NR::NonOverlapOp && nondegRequirement != NR::CoverSequence) {
         if (seqNondegenSt.has(NondegeneracyStatus::AdmitsEmpty))
             context.addDiag(diag::SeqEmptyMatch, syntax.sourceRange());
     }
@@ -251,12 +251,13 @@ const AssertionExpr& AssertionExpr::bind(const PropertyExprSyntax& syntax,
 }
 
 const AssertionExpr& AssertionExpr::bind(const PropertySpecSyntax& syntax,
-                                         const ASTContext& context) {
+                                         const ASTContext& context,
+                                         NondegeneracyRequirement nondegRequirement) {
     ASTContext ctx(context);
     ctx.flags |= ASTFlags::AssignmentDisallowed;
 
     bool allowDisable = syntax.disable == nullptr;
-    auto result = &bind(*syntax.expr, context, allowDisable);
+    auto result = &bind(*syntax.expr, context, allowDisable, nondegRequirement);
 
     if (syntax.disable) {
         auto& disable = DisableIffAssertionExpr::fromSyntax(*syntax.disable, *result, context);

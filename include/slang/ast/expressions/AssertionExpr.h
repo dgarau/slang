@@ -149,6 +149,11 @@ public:
         /// or followed-by operator shall admit at least one match. Such a sequence can
         /// admit only empty matches.
         NonOverlapOp,
+
+        /// The sequence of a `cover sequence` statement (§16.14.3). It is not used as a
+        /// property, so §16.12.22's restrictions do not apply to it and it may admit an
+        /// empty match; it must still admit some match.
+        CoverSequence,
     };
 
     /// A result structure for checking nondegeneracy.
@@ -202,8 +207,9 @@ public:
         bool allowDisable = false,
         NondegeneracyRequirement nondegRequirement = NondegeneracyRequirement::Default);
 
-    static const AssertionExpr& bind(const syntax::PropertySpecSyntax& syntax,
-                                     const ASTContext& context);
+    static const AssertionExpr& bind(
+        const syntax::PropertySpecSyntax& syntax, const ASTContext& context,
+        NondegeneracyRequirement nondegRequirement = NondegeneracyRequirement::Default);
 
     static bool checkAssertionCall(const CallExpression& call, const ASTContext& context,
                                    DiagCode outArgCode, DiagCode refArgCode, DiagCode nonVoidCode,
