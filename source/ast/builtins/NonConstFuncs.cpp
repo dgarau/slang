@@ -428,6 +428,12 @@ public:
         AssertionExpr::checkSampledValueExpr(*args[0], context, isFuture,
                                              diag::SampledValueLocalVar, diag::SampledValueMatched);
 
+        // IEEE 1800-2023 16.9.4: $past_gclk(v) is $past(v,,, @$global_clock) and $future_gclk(v) is the
+        // sampled value of v at the next global clock tick, so both have the type of their argument, as
+        // $past does. The remaining functions return a 1-bit truth value.
+        if (knownNameId == KnownSystemName::PastGclk || knownNameId == KnownSystemName::FutureGclk)
+            return *args[0]->type;
+
         return comp.getBitType();
     }
 

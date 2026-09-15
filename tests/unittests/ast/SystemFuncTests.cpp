@@ -3,6 +3,7 @@
 
 #include "Test.h"
 
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
@@ -1127,6 +1128,45 @@ endmodule
     auto diags = compilation.getAllDiagnostics().filter(DefaultIgnoreWarnings);
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::SysFuncHierarchicalNotAllowed);
+}
+
+TEST_CASE("Global clocking past and future value functions have the argument's type") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    wire clk;
+    global clocking @(posedge clk); endclocking
+
+    logic [7:0] d;
+    logic [7:0] p;
+    bit r;
+    always @(posedge clk) begin
+        p <= $past_gclk(d);
+        r <= $rose_gclk(d);
+    end
+
+    assert property (@(posedge clk) $future_gclk(d) == d);
+    assert property (@(posedge clk) $rising_gclk(d));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto typeOf = [&](std::string_view name) -> std::string {
+        std::string result;
+        compilation.getRoot().visit(makeVisitor([&](auto& visitor, const CallExpression& call) {
+            if (call.getSubroutineName() == name && result.empty())
+                result = call.type->toString();
+            visitor.visitDefault(call);
+        }));
+        return result;
+    };
+
+    CHECK(typeOf("$past_gclk") == "logic[7:0]");
+    CHECK(typeOf("$future_gclk") == "logic[7:0]");
+    CHECK(typeOf("$rose_gclk") == "bit");
+    CHECK(typeOf("$rising_gclk") == "bit");
 }
 
 TEST_CASE("Sampled value functions") {
