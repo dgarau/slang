@@ -263,6 +263,9 @@ TEST_CASE("Integer operators") {
     // Wildcard equality
     EVAL("5'b11001 ==? {1'b1 / 1'b0, 4'b1001}", 1);
     EVAL("({1'b1 / 1'b0, 4'b1001} ==? 5'b11001) === 'x", 1);
+    EVAL("(4'b1x00 ==? 4'b000z) === 1'b0", 1);
+    EVAL("(4'b1x00 inside {4'b000z}) === 1'b0", 1);
+    EVAL("(4'b0x00 ==? 4'b000z) === 'x", 1);
 
 #undef EVAL
     NO_SESSION_ERRORS;

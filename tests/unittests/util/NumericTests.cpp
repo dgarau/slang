@@ -648,6 +648,17 @@ TEST_CASE("SVInt misc functions") {
     CHECK_THAT(condWildcardEqual("5'bxx100"_si, "12'bxx101"_si), exactlyEquals(logic_t(0)));
     CHECK_THAT(condWildcardEqual("5'bxx10x"_si, "12'bxx101"_si), exactlyEquals(logic_t::x));
 
+    // A cared-about bit known on both sides that differs decides the result even when another
+    // cared-about bit of the lhs is unknown (11.4.6 compares those bits as for ==).
+    CHECK_THAT(condWildcardEqual("4'b1x00"_si, "4'b000z"_si), exactlyEquals(logic_t(0)));
+    CHECK_THAT(condWildcardEqual("4'b0x00"_si, "4'b000z"_si), exactlyEquals(logic_t::x));
+    // ...including when the cared-about unknown bits (7:4) and the differing bit (71) are in
+    // different words -- the word-by-word loop used to return x at word 0 before reaching word 1.
+    CHECK_THAT(condWildcardEqual("72'h80_0000_0000_0000_00x0"_si, "72'h00_0000_0000_0000_000z"_si),
+               exactlyEquals(logic_t(0)));
+    CHECK_THAT(condWildcardEqual("72'h00_0000_0000_0000_000x"_si, "72'h00_0000_0000_0000_000z"_si),
+               exactlyEquals(logic_t(1)));
+
     CHECK(caseZWildcardEqual("5'b10110"_si, "5'b10110"_si));
     CHECK(!caseZWildcardEqual("5'b10010"_si, "5'b10110"_si));
     CHECK(caseZWildcardEqual("7'b??101x0"_si, "5'b101?0"_si));
