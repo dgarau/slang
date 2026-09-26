@@ -682,16 +682,23 @@ public:
         if (argIndex == 1) {
             auto indexType = args[0]->type->getAssociativeIndexType();
             if (indexType) {
-                return Expression::bindArgument(*indexType, ArgumentDirection::Ref, {}, syntax,
-                                                context);
+                // IEEE 1800-2023 7.9.8: the argument "shall be assignment compatible with the index
+                // type", and an integral argument narrower than the index type is legal (the method
+                // returns -1 and truncates). A ref binding demands an equivalent type, which refuses
+                // the clause's own example, so an integral index binds the argument as an inout
+                // lvalue with assignment conversions in both directions instead.
+                auto direction = indexType->isIntegral() ? ArgumentDirection::InOut
+                                                         : ArgumentDirection::Ref;
+                return Expression::bindArgument(*indexType, direction, {}, syntax, context);
             }
         }
 
         return SystemSubroutine::bindArgument(argIndex, context, syntax, args);
     }
 
-    // Return type is 'int' but the actual value is always either 0 or 1
-    std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
+    // Return type is 'int', and the value is 0, 1 or -1 (7.9.8: an argument narrower than the index
+    // type), so the full width is effective.
+    std::optional<bitwidth_t> getEffectiveWidth() const final { return std::nullopt; }
 
     bool isArgByRef(size_t argIndex) const final {
         // The first argument is the associative array, the second is the index.
