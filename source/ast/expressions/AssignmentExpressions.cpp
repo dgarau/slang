@@ -448,9 +448,15 @@ Expression& AssignmentExpression::fromComponents(
 }
 
 bool AssignmentExpression::isLValueArg() const {
-    return right().kind == ExpressionKind::EmptyArgument ||
-           (right().kind == ExpressionKind::Conversion &&
-            right().as<ConversionExpression>().operand().kind == ExpressionKind::EmptyArgument);
+    // An output or inout argument is bound as `lvalue = EmptyArgument`, with the argument's
+    // conversion from the formal's type applied to the right-hand side -- and that conversion can
+    // be more than one node (a width change and a signedness or four-state change nest two).
+    // Peeling only one made an argument such as `logic [31:0]` against an `int` formal look like a
+    // real assignment, and data-flow analysis then visited its left side as an lvalue twice.
+    const Expression* rhs = &right();
+    while (rhs->kind == ExpressionKind::Conversion)
+        rhs = &rhs->as<ConversionExpression>().operand();
+    return rhs->kind == ExpressionKind::EmptyArgument;
 }
 
 ConstantValue AssignmentExpression::evalImpl(EvalContext& context) const {
