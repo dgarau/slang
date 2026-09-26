@@ -904,6 +904,34 @@ endmodule
     CHECK(diags[0].code == diag::AssociativeWildcardNotAllowed);
 }
 
+TEST_CASE("Associative array traversal argument is assignment compatible (7.9.8)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    string aa[int];
+    int bb[byte];
+    byte ix;
+    longint wide;
+    logic [31:0] lv;
+    int status;
+
+    initial begin
+        aa[1000] = "a";
+        status = aa.first(ix);    // 7.9.8's own example: narrower, returns -1
+        status = aa.last(wide);   // wider
+        status = aa.next(lv);     // 4-state, unsigned
+        status = bb.prev(status); // wider than a byte index
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    // Width and signedness lint warnings are expected: the conversions are real. No errors.
+    for (auto& diag : compilation.getAllDiagnostics())
+        CHECK(!diag.isError());
+}
+
 TEST_CASE("std package lookups") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
