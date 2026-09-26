@@ -1621,3 +1621,32 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::MixedVarAssigns);
 }
+
+TEST_CASE("Output argument with two conversions is an lvalue argument (7.9.8)") {
+    // A traversal argument that changes both width and signedness or four-state from the index
+    // type nests two conversions over the EmptyArgument; analysis must still see an lvalue arg.
+    auto& code = R"(
+module m;
+    int aa[int];
+    int bb[logic [7:0]];
+    logic [31:0] k;
+    bit [63:0] w;
+    logic signed [3:0] n;
+    int i;
+    int st;
+    initial begin
+        st = aa.first(k);
+        st = aa.next(w);
+        st = aa.prev(n);
+        st = bb.last(i);
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    for (auto& diag : diags)
+        CHECK(!diag.isError());
+}
