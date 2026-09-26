@@ -2434,6 +2434,16 @@ TEST_CASE("Array locator methods") {
 
     session.eval("int e[] = {1, 1, 4, 9, -3, 1, 2};");
     CHECK(session.eval("e.unique").toString() == "[1,4,9,-3,2]");
+
+    // 7.12.1: a fixed-size array's index locators return DECLARED indices, left bound first (7.6).
+    session.eval("int fdx[3:0] = '{7, 5, 7, 1};");
+    CHECK(session.eval("fdx.find_index with (item == 7)").toString() == "[3,1]");
+    CHECK(session.eval("fdx.find_first_index with (item == 7)").toString() == "[3]");
+    CHECK(session.eval("fdx.find_last_index with (item == 7)").toString() == "[1]");
+    CHECK(session.eval("fdx.unique_index").toString() == "[3,2,0]");
+    session.eval("int gax[1:3] = '{7, 5, 7};");
+    CHECK(session.eval("gax.find_index with (item == 7)").toString() == "[1,3]");
+    CHECK(session.eval("gax.unique_index with (item % 2)").toString() == "[1]");
     CHECK(session.eval("e.unique_index").toString() == "[0,2,3,4,6]");
     CHECK(session.eval("e.unique with (item == 4 ? 1 : item)").toString() == "[1,9,-3,2]");
     CHECK(session.eval("e.unique_index with (item == 4 ? 1 : item)").toString() == "[0,3,4,6]");

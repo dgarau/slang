@@ -242,6 +242,19 @@ public:
     }
 };
 
+// IEEE 1800-2023 7.12.1 / 7.12.4: an index locator returns the element's INDEX, which for a fixed-size array is its
+// declared index -- the left bound first (7.6) -- not its position. `int d[3:0]` holds d[3] at position 0.
+static SVInt declaredIndexOf(const Type& arrayType, int64_t position) {
+    const Type& ct = arrayType.getCanonicalType();
+    if (ct.hasFixedRange()) {
+        auto range = ct.getFixedRange();
+        int64_t index = range.left >= range.right ? int64_t(range.left) - position
+                                               : int64_t(range.left) + position;
+        return SVInt(32, (uint64_t)index, true);
+    }
+    return SVInt(32, (uint64_t)position, true);
+}
+
 class ArrayLocatorMethod : public SystemSubroutine {
 public:
     enum Mode { All, First, Last } mode;
@@ -327,7 +340,7 @@ public:
                             if (mode == Last)
                                 dist = std::ranges::distance(begin, end) - dist - 1;
 
-                            results.emplace_back(SVInt(32, (uint64_t)dist, true));
+                            results.emplace_back(declaredIndexOf(*args[0]->type, dist));
                         }
                         else {
                             results.emplace_back(*it);
@@ -498,7 +511,7 @@ public:
                 auto cv = iterExpr->eval(context);
                 if (seen.emplace(cv).second) {
                     if (isIndexed && !arr.isMap())
-                        result.emplace_back(SVInt(32, index, true));
+                        result.emplace_back(declaredIndexOf(*args[0]->type, index));
                     else if (isIndexed)
                         result.emplace_back(it.key());
                     else
@@ -512,7 +525,7 @@ public:
             for (auto it = begin(arr); it != end(arr); ++it, ++index) {
                 if (seen.emplace(*it).second) {
                     if (isIndexed && !arr.isMap())
-                        result.emplace_back(SVInt(32, index, true));
+                        result.emplace_back(declaredIndexOf(*args[0]->type, index));
                     else if (isIndexed)
                         result.emplace_back(it.key());
                     else
