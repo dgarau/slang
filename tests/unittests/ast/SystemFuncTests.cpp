@@ -1015,7 +1015,7 @@ module m;
     initial begin
         $q_initialize(1, 2, 3, i);
         $q_add(1, 2, 3, i);
-        $q_remove(1, 2, i, j);
+        $q_remove(1, i, i, j);
         j = $q_full(1, i);
         $q_exam(1, 2, i, j);
     end
@@ -1025,6 +1025,23 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Stochastic q_remove job_id is an output") {
+    // IEEE 1800-2023 20.15.3: "The job_id argument is an integer output that identifies the entry being removed."
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    int i, j;
+    initial $q_remove(1, 2, i, j);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ExpressionNotAssignable);
 }
 
 TEST_CASE("Distribution functions") {

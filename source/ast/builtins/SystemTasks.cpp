@@ -1088,7 +1088,7 @@ void Builtins::registerSystemTasks() {
     addSystemSubroutine(std::make_shared<StochasticTask>(name, kind, input, output))
     TASK(KnownSystemName::QInitialize, SubroutineKind::Task, 3, 1);
     TASK(KnownSystemName::QAdd, SubroutineKind::Task, 3, 1);
-    TASK(KnownSystemName::QRemove, SubroutineKind::Task, 2, 2);
+    TASK(KnownSystemName::QRemove, SubroutineKind::Task, 1, 3);
     TASK(KnownSystemName::QExam, SubroutineKind::Task, 2, 2);
     TASK(KnownSystemName::QFull, SubroutineKind::Function, 1, 1);
 
