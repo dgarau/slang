@@ -2411,6 +2411,38 @@ TEST_CASE("Array ordering methods") {
     NO_SESSION_ERRORS;
 }
 
+TEST_CASE("Unpacked array equality folds per element (7.4.6, 11.4.5)") {
+    ScriptSession session;
+    session.eval("int p[2] = '{1, 2};");
+    session.eval("int q[2] = '{1, 3};");
+    session.eval("int r[2] = '{1, 2};");
+    // An inequality is the NEGATION of the equality: the first EQUAL element does not decide it.
+    CHECK(session.eval("p != q").integer() == 1);
+    CHECK(session.eval("p == q").integer() == 0);
+    CHECK(session.eval("p != r").integer() == 0);
+    CHECK(session.eval("p !== q").integer() == 1);
+    CHECK(session.eval("p === r").integer() == 1);
+
+    // An element known to differ decides the result whatever order an unknown element comes in.
+    session.eval("logic [3:0] x1[2] = '{4'bx, 4'd1};");
+    session.eval("logic [3:0] x2[2] = '{4'd0, 4'd2};");
+    CHECK(session.eval("x1 == x2").integer() == 0);
+    CHECK(session.eval("x1 != x2").integer() == 1);
+    session.eval("logic [3:0] x3[2] = '{4'bx, 4'd2};");
+    CHECK(session.eval("x3 == x2").toString() == "1'bx");
+    CHECK(session.eval("x3 != x2").toString() == "1'bx");
+    CHECK(session.eval("x3 === x3").integer() == 1);
+
+    // Arrays of different sizes are unequal, and != says so.
+    session.eval("int d1[] = '{1, 2};");
+    session.eval("int d2[] = '{1};");
+    CHECK(session.eval("d1 == d2").integer() == 0);
+    CHECK(session.eval("d1 != d2").integer() == 1);
+    session.eval("int q1[$] = '{5, 6};");
+    session.eval("int q2[$] = '{5, 7};");
+    CHECK(session.eval("q1 != q2").integer() == 1);
+}
+
 TEST_CASE("Array locator methods") {
     ScriptSession session;
     session.eval("int a[] = {1, 4, 2, 9, 8, 8};");
