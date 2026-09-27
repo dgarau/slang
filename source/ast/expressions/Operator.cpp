@@ -330,22 +330,34 @@ ConstantValue OpInfo::eval(BinaryOperator op, const ConstantValue& cvl, const Co
             return evalLogicalOp(op, (bool)l, (bool)cvr.real());
     }
     else if (cvl.isContainer()) {
+        // Aggregate (in)equality is the equality of every element (7.4.6, 11.4.5): compute the
+        // positive comparison, where an element known to differ decides the result whatever the
+        // others are and an unknown element otherwise makes it unknown, then negate it for the
+        // inequality operators. Arrays of different sizes are unequal.
+        const bool negate = op == BinaryOperator::Inequality || op == BinaryOperator::CaseInequality;
+        const BinaryOperator positive = op == BinaryOperator::Inequality       ? BinaryOperator::Equality
+                                        : op == BinaryOperator::CaseInequality ? BinaryOperator::CaseEquality
+                                                                               : op;
+        auto finish = [negate](logic_t equal) { return SVInt(negate ? !equal : equal); };
         if (cvl.size() != cvr.size())
-            return SVInt(false);
+            return finish(logic_t(false));
 
+        bool anyUnknown = false;
         auto li = begin(cvl);
         auto ri = begin(cvr);
         for (; li != end(cvl); li++, ri++) {
-            ConstantValue result = eval(op, *li, *ri);
+            ConstantValue result = eval(positive, *li, *ri);
             if (!result)
                 return nullptr;
 
             logic_t l = (logic_t)result.integer();
-            if (l.isUnknown() || !l)
-                return SVInt(l);
+            if (l.isUnknown())
+                anyUnknown = true;
+            else if (!l)
+                return finish(logic_t(false));
         }
 
-        return SVInt(true);
+        return finish(anyUnknown ? logic_t::x : logic_t(true));
     }
     else if (cvl.isString()) {
         auto& l = cvl.str();
