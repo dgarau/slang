@@ -1624,7 +1624,17 @@ Expression& StructuredAssignmentPatternExpression::forAssociativeArray(
 
     for (auto item : syntax.items) {
         if (item->key->kind == SyntaxKind::DefaultPatternKeyExpression) {
-            bindDefaultSetter(context, *item, defaultSetter, bad);
+            // Unlike the default of a fixed array or struct pattern, which may apply to nested
+            // elements of any type, an associative array's default IS an element value (7.9.11),
+            // so it is bound in the element type's assignment-like context -- a string literal
+            // becomes a string, a nested pattern gets its target type, and a narrower or wider
+            // integral value is converted as an assignment would convert it.
+            if (defaultSetter) {
+                context.addDiag(diag::AssignmentPatternKeyDupDefault, item->key->sourceRange());
+                bad = true;
+            }
+            defaultSetter = &bindRValue(elementType, *item->expr, {}, context);
+            bad |= defaultSetter->bad();
         }
         else if (DataTypeSyntax::isKind(item->key->kind)) {
             context.addDiag(diag::AssignmentPatternDynamicType, item->key->sourceRange());

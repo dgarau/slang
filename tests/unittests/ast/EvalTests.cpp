@@ -628,6 +628,21 @@ TEST_CASE("Queue read at the append index") {
     CHECK(diags[0].code == diag::ConstEvalDynamicArrayIndex);
 }
 
+TEST_CASE("Associative array default is converted to the element type (7.9.11)") {
+    ScriptSession session;
+    session.eval("string w[int] = '{default:\"hi\"};");
+    CHECK(session.eval("w[3]").str() == "hi");
+    CHECK(session.eval("w.num").integer() == 0);
+
+    session.eval("typedef struct {int x; int y;} p_t;");
+    session.eval("p_t ps[int] = '{default:'{x:3, y:4}};");
+    CHECK(session.eval("ps[2].y").integer() == 4);
+
+    session.eval("byte b[int] = '{1:5, default:300};");
+    CHECK(session.eval("b[7]").integer() == 44);
+    NO_SESSION_ERRORS;
+}
+
 TEST_CASE("Associative array eval") {
     ScriptSession session;
     session.eval("integer arr[string] = '{\"Hello\":4, \"World\":8, default:-1};");
