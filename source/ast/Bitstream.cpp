@@ -12,6 +12,8 @@
 
 #include "slang/ast/Compilation.h"
 #include "slang/ast/EvalContext.h"
+#include "slang/ast/LValue.h"
+#include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/expressions/OperatorExpressions.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
@@ -723,6 +725,116 @@ ConstantValue Bitstream::reOrder(ConstantValue&& value, uint64_t sliceSize, uint
     return result;
 }
 
+/// An unpack's `with [range]` item (SVMake K-458, IEEE 1800-2023 11.4.14.4). The array's lvalue is resolved first, so
+/// `$` names its live last index. The range is normalized to positions lo..hi: `[k]` is `[k:k]`, and `[a:b]` with a > b
+/// on a queue or dynamic array is the empty range (7.10.1). The whole range is consumed, and each position the array
+/// has is stored: a variable-size array is first grown to hold [0:hi] (its new elements at their default), a negative
+/// or out-of-extent position is skipped, and a bounded queue is then held to its bound (7.10.5).
+static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpression& stream,
+                           const Expression& operand, PackIterator& iter, const PackIterator iterEnd,
+                           uint64_t& bitOffset, uint64_t& dynamicSize, EvalContext& context) {
+    auto& arrayType = *operand.type;
+    auto elemType = arrayType.getArrayElementType();
+    SLANG_ASSERT(elemType);
+
+    LValue lvalue = operand.evalLValue(context);
+    if (!lvalue)
+        return false;
+    ConstantValue current = lvalue.load();
+
+    const bool fixed = arrayType.hasFixedRange();
+    int64_t lo = 0, hi = -1;
+    bool empty = false;
+    auto& withExpr = *stream.withExpr;
+    if (withExpr.kind == ExpressionKind::ElementSelect) {
+        auto& select = withExpr.as<ElementSelectExpression>();
+        auto prevQ = context.getQueueTarget();
+        if (current.isQueue())
+            context.setQueueTarget(&current);
+        ConstantValue cs = select.selector().eval(context);
+        context.setQueueTarget(prevQ);
+        if (!cs)
+            return false;
+
+        std::optional<int32_t> index = cs.integer().as<int32_t>();
+        if (!index) {
+            context.addDiag(diag::IndexValueInvalid, select.selector().sourceRange) << cs << arrayType;
+            return false;
+        }
+
+        int64_t pos = *index;
+        if (fixed) {
+            auto range = arrayType.getFixedRange();
+            if (!range.containsPoint(*index))
+                context.addDiag(diag::IndexOOB, select.sourceRange) << cs << arrayType;
+            pos = range.reverse().translateIndex(*index);
+        }
+        lo = hi = pos;
+    }
+    else {
+        // `$` through the queue target, and no value handed to evalRange: a range past a variable-size array's extent
+        // is not a range error here -- the array is grown to hold it.
+        auto& select = withExpr.as<RangeSelectExpression>();
+        auto prevQ = context.getQueueTarget();
+        if (current.isQueue())
+            context.setQueueTarget(&current);
+        auto range = select.evalRange(context, ConstantValue(), /* enforceBounds */ false);
+        context.setQueueTarget(prevQ);
+        if (!range)
+            return false;
+
+        if (!fixed && select.getSelectionKind() == RangeSelectionKind::Simple && range->left > range->right)
+            empty = true;
+        lo = std::min(range->left, range->right);
+        hi = std::max(range->left, range->right);
+    }
+
+    const uint64_t count = empty ? 0 : uint64_t(hi - lo + 1);
+    auto withSize = checkedMulU64(elemType->getBitstreamWidth(), count);
+    if (!withSize || withSize > Type::MaxBitWidth) {
+        context.addDiag(diag::ObjectTooLarge, withExpr.sourceRange);
+        return false;
+    }
+
+    if (dynamicSize > 0 && !stream.constantWithWidth) {
+        if (withSize >= dynamicSize)
+            dynamicSize = 0;
+        else
+            dynamicSize -= *withSize;
+    }
+
+    SmallVector<ConstantValue> elems;
+    for (uint64_t k = 0; k < count; k++)
+        elems.emplace_back(unpackBitstream(*elemType, iter, iterEnd, bitOffset, dynamicSize));
+
+    if (!fixed && !empty && hi >= 0 && current.size() <= uint64_t(hi)) {
+        // When the array is a variable-size array, it shall be resized to accommodate the range expression.
+        const size_t want = size_t(hi) + 1;
+        if (current.isQueue()) {
+            auto& queue = *current.queue();
+            queue.insert(queue.end(), want - queue.size(), elemType->getDefaultValue());
+        }
+        else {
+            ConstantValue::Elements grown(current.elements().begin(), current.elements().end());
+            grown.insert(grown.end(), want - grown.size(), elemType->getDefaultValue());
+            current = std::move(grown);
+        }
+    }
+
+    for (uint64_t k = 0; k < count; k++) {
+        const int64_t pos = lo + int64_t(k);
+        if (pos < 0 || uint64_t(pos) >= current.size())
+            continue;
+        current.at(size_t(pos)) = std::move(elems[k]);
+    }
+
+    if (current.isQueue())
+        current.queue()->resizeToBound();
+
+    lvalue.store(current);
+    return true;
+}
+
 /// Performs unpack operation of streaming concatenation target on a bit-stream.
 static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, PackIterator& iter,
                                 const PackIterator iterEnd, uint64_t& bitOffset,
@@ -766,6 +878,10 @@ static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, Pac
 
             SLANG_ASSERT(dynamicSizeSave == dynamicSize);
             SLANG_ASSERT(iterConcat == std::cend(packed) && !bit);
+        }
+        else if (stream.withExpr && !dryRun) {
+            if (!unpackWithItem(stream, operand, iter, iterEnd, bitOffset, dynamicSize, context))
+                return false;
         }
         else {
             auto& arrayType = *operand.type;

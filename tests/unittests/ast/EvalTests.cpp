@@ -2312,6 +2312,88 @@ endfunction
     NO_SESSION_ERRORS;
 }
 
+TEST_CASE("SVMake K-458: an unpack's with range -- reversed, $, [k] outside, a bounded queue") {
+    // An unpack `with` (11.4.14.4) resolves its array first (so `$` is the live last index), reads [k] as [k:k], and
+    // reads [a:b] with a > b on a queue as the empty range (7.10.1); the whole range is consumed and each position the
+    // array has is stored, a variable-size array grown to [0:hi] and a bounded queue then held to its bound (7.10.5).
+    // The engine's lowering does the same (streaming_unpack_dynamic N1-N4, B1); these used to assert, throw, stop the
+    // unpack, or store nothing.
+    ScriptSession session;
+    session.eval(R"(
+typedef byte bq_t[$];
+typedef byte fa_t[4];
+function bq_t r1();
+    byte q[$]; int a, b; byte x;
+    q = '{7}; a = 3; b = 1;
+    {>>{q with [a:b], x}} = 16'h0102;
+    q.push_back(x);
+    return q;
+endfunction
+function bq_t r2();
+    byte q[$];
+    q = '{1, 2, 3};
+    {>>{q with [1:$]}} = 16'hAABB;
+    return q;
+endfunction
+function fa_t r3();
+    byte fa[4]; byte z; int k;
+    fa = '{8'hF0, 8'hF1, 8'hF2, 8'hF3}; k = 7;
+    {>>{fa with [k], z}} = 16'h0102;
+    fa[0] = z;
+    return fa;
+endfunction
+function bq_t r4();
+    byte bq[$:1];
+    bq = '{8'h55};
+    {>>{bq with [1:2]}} = 16'h0102;
+    return bq;
+endfunction
+function bq_t r5();
+    byte bq[$:1];
+    {>>{bq with [0:3]}} = 32'h01020304;
+    return bq;
+endfunction
+function bq_t r6();
+    byte q[$]; int k;
+    k = -1;
+    {>>{q with [k:1]}} = 24'hA1B2C3;
+    return q;
+endfunction
+)");
+
+    auto q1 = *session.eval("r1()").queue();
+    REQUIRE(q1.size() == 2);
+    CHECK(q1[0].integer() == 7);
+    CHECK(q1[1].integer() == 1);
+
+    auto q2 = *session.eval("r2()").queue();
+    REQUIRE(q2.size() == 3);
+    CHECK(q2[0].integer() == 1);
+    CHECK(q2[1].integer() == "8'shaa"_si);
+    CHECK(q2[2].integer() == "8'shbb"_si);
+
+    auto f3 = session.eval("r3()");
+    REQUIRE(f3.elements().size() == 4);
+    CHECK(f3.elements()[0].integer() == 2);
+    CHECK(f3.elements()[1].integer() == "8'shf1"_si);
+    CHECK(f3.elements()[3].integer() == "8'shf3"_si);
+
+    auto q4 = *session.eval("r4()").queue();
+    REQUIRE(q4.size() == 2);
+    CHECK(q4[0].integer() == "8'sh55"_si);
+    CHECK(q4[1].integer() == 1);
+
+    auto q5 = *session.eval("r5()").queue();
+    REQUIRE(q5.size() == 2);
+    CHECK(q5[0].integer() == 1);
+    CHECK(q5[1].integer() == 2);
+
+    auto q6 = *session.eval("r6()").queue();
+    REQUIRE(q6.size() == 2);
+    CHECK(q6[0].integer() == "8'shb2"_si);
+    CHECK(q6[1].integer() == "8'shc3"_si);
+}
+
 TEST_CASE("Streaming 'with' range starting past the array extent") {
     // Regression: a source-side streaming 'with' range may begin beyond the current
     // queue/dynamic-array size; the nonexistent elements are streamed as the default
