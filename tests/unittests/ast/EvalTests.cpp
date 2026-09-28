@@ -2253,7 +2253,7 @@ endfunction
 
     auto diags = session.getDiagnostics();
     REQUIRE(diags.size() == 1);
-    CHECK(diags[0].code == diag::BadStreamSize);
+    CHECK(diags[0].code == diag::ConstEvalStreamRoundUp);
 }
 
 TEST_CASE("SVMake READINGS-b5: an unpack's source sizes (11.4.14.3, followup/14b)") {
@@ -2297,6 +2297,12 @@ function int s2();
     return x;
 endfunction
 
+function longint n1();
+    byte q[$]; byte b; b = 8'h77;
+    {>>{ {<< 4 {q}}, b}} = 20'hABCDE;
+    return {q.size()[7:0], q[0], b};
+endfunction
+
 function byte w1();
     byte len, crc, pay[];
     {>>{len, pay with [0 +: len], crc}} = 24'h02_AABB;
@@ -2324,12 +2330,16 @@ endfunction
     CHECK((*g3.queue())[3].integer() == "8'sh0f"_si);
     auto diags = session.getDiagnostics();
     INFO(report(diags));
-    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.isError(); }) == 1);
-    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.code == diag::BadStreamSize; }) == 1);
+    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.isError(); }) == 0);
+    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.code == diag::ConstEvalStreamRoundUp; }) == 1);
 
     // S2, W1: more bits are needed than the source provides -- the run ends, so the evaluation fails.
     CHECK(!session.eval("s2()"));
     CHECK(!session.eval("w1()"));
+
+    // The closing review's H1: a round-up inside a sliced nested stream fails the evaluation (it asserted, or folded
+    // a wrong value with SLANG_ASSERT compiled out).
+    CHECK(!session.eval("n1()"));
 }
 
 TEST_CASE("Recursive function call") {

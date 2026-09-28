@@ -943,8 +943,17 @@ static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, Pac
             // A dry run collects rvalue without storing lvalue
             uint64_t dynamicSizeSave = dynamicSize;
             SmallVector<ConstantValue> toBeOrdered;
+            bool dryPartial = false;
             if (!unpackConcatenation(concat, iter, iterEnd, bitOffset, dynamicSize, context,
-                                     &toBeOrdered, partial)) {
+                                     &toBeOrdered, &dryPartial)) {
+                return false;
+            }
+            if (dryPartial) {
+                // SVMake READINGS-b5 closing review H1: a greedy item rounded up INSIDE a sliced nested stream. The dry
+                // run's zero padding would be re-ordered with the real bits and the real pass would read fewer than the
+                // dry run produced. The engine refuses this shape by name; the fold fails rather than guess.
+                context.addDiag(diag::BadStreamSize, concat.sourceRange)
+                    << formatWidth(concat, BitstreamSizeMode::DestFill) << dynamicSizeSave;
                 return false;
             }
 
@@ -1108,9 +1117,11 @@ ConstantValue Bitstream::evaluateTarget(const StreamingConcatenationExpression& 
         return nullptr;
 
     if (partial) {
-        auto& diag = context.addDiag(diag::BadStreamSize, lhs.sourceRange);
+        // A WARNING, not an error: the run time reports and still assigns (Questa, Xcelium), so a fold of the same
+        // code must elaborate and agree with it (SVMake READINGS-b5 closing review M2).
+        auto& diag = context.addDiag(diag::ConstEvalStreamRoundUp, lhs.sourceRange);
+        diag << srcSize - targetWidth;
         diag << formatWidth(lhs, BitstreamSizeMode::DestFill);
-        diag << srcSize;
     }
 
     return rvalue;

@@ -1130,6 +1130,7 @@ warning dynarray-index ConstEvalDynamicArrayIndex "invalid index {} for {} of le
 warning dynarray-range ConstEvalDynamicArrayRange "invalid range [{}:{}] for {} of length {}"
 warning queue-range ConstEvalQueueRange "reversed selection range [{}:{}] for queue will always yield an empty result"
 warning empty-queue ConstEvalEmptyQueue "pop from empty queue"
+warning stream-round-up ConstEvalStreamRoundUp "stream unpack source ends inside an element of a dynamically sized item ({} bits left after the fixed items of a target of size {}); the last element is zero-filled"
 warning task-ignored ConstSysTaskIgnored "system task '{}' is ignored in constant expression"
 warning constant-conversion ConstantConversion "implicit conversion from {} to {} changes value from {} to {}"
 
@@ -1296,7 +1297,7 @@ group default = { real-underflow real-overflow vector-overflow int-overflow unco
                   unconnected-output-port unconnected-inout-port null-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
                   extra-pragma-args expected-diag-arg unknown-diag-arg pragma-diag-level explicit-static
-                  static-skipped elem-not-found dynarray-index dynarray-range queue-range empty-queue
+                  static-skipped elem-not-found dynarray-index dynarray-range queue-range empty-queue stream-round-up
                   unknown-escape-code missing-top warning-task unsized-concat finish-num
                   nonblocking-final constraint-missing missing-format dpi-spec enum-range udp-port-empty
                   lifetime-prototype net-inconsistent port-coercion empty-body reversed-range
