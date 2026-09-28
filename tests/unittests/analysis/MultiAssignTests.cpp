@@ -1650,3 +1650,21 @@ endmodule
     for (auto& diag : diags)
         CHECK(!diag.isError());
 }
+
+TEST_CASE("SVMake AGG-b1: an unpacked slice driver covers every element it selects") {
+    auto& code = R"(
+module top;
+    logic [7:0] a [3:0];
+    logic [7:0] x, y, z;
+    always_comb a[1:0] = '{x, y};
+    always_comb a[0] = z;
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::MultipleAlwaysAssigns);
+}
