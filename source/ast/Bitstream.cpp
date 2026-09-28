@@ -369,7 +369,7 @@ static SVInt slicePacked(PackIterator& iter, const PackIterator iterEnd, uint64_
 /// Performs unpack operation on a bit-stream.
 static ConstantValue unpackBitstream(const Type& type, PackIterator& iter,
                                      const PackIterator iterEnd, uint64_t& bit,
-                                     uint64_t& dynamicSize) {
+                                     uint64_t& dynamicSize, bool* partial = nullptr) {
 
     auto concatPacked = [&](bitwidth_t width, bool isFourState) {
         SmallVector<SVInt> buffer;
@@ -404,11 +404,20 @@ static ConstantValue unpackBitstream(const Type& type, PackIterator& iter,
         // For implicit streaming concatenation conversion, width is the smallest multiple of
         // CHAR_BIT greater than or equal to dynamicSize.
         auto width = (dynamicSize + CHAR_BIT - 1) / CHAR_BIT;
+        auto taken = dynamicSize;
         dynamicSize = 0;
         if (!bit && iter != iterEnd && (*iter)->isString() && (*iter)->str().length() == width)
             return std::move(**iter);
 
-        return ConstantValue(concatPacked(bitwidth_t(width * CHAR_BIT), false)).convertToStr();
+        if (taken % CHAR_BIT == 0)
+            return ConstantValue(concatPacked(bitwidth_t(width * CHAR_BIT), false)).convertToStr();
+
+        // SVMake READINGS-b4: the greedy item takes only the bits left for it (the fixed items after it keep theirs),
+        // rounded up to whole characters with the last one zero-filled on the right -- and that is an error.
+        if (partial)
+            *partial = true;
+        auto cc = concatPacked(bitwidth_t(taken), false).zext(bitwidth_t(width * CHAR_BIT));
+        return ConstantValue(cc.shl(bitwidth_t(width * CHAR_BIT - taken))).convertToStr();
     }
 
     if (type.isUnpackedArray()) {
@@ -429,9 +438,26 @@ static ConstantValue unpackBitstream(const Type& type, PackIterator& iter,
                 // elemWidth. For implicit streaming concatenation conversion, num is the smallest
                 // number of elements that make it as wide as or wider than dynamicSize.
                 uint64_t num = (dynamicSize + elemWidth - 1) / elemWidth;
+                const uint64_t rem = dynamicSize % elemWidth;
                 for (uint64_t i = num; i > 0; i--) {
+                    if (i == 1 && rem) {
+                        // SVMake READINGS-b4: the reservation model. The greedy item takes only the bits left for
+                        // it, so the fixed items after it keep theirs; its last element is those bits zero-filled
+                        // on the right (an error the caller reports), read from a copy cut where they end.
+                        if (partial)
+                            *partial = true;
+                        ConstantValue cut = concatPacked(bitwidth_t(rem), true)
+                                                .zext(bitwidth_t(elemWidth))
+                                                .shl(bitwidth_t(elemWidth - rem));
+                        ConstantValue* cutPacked[] = {&cut};
+                        PackIterator cutIter = cutPacked;
+                        uint64_t cutBit = 0, cutSize = 0;
+                        buffer.emplace_back(unpackBitstream(*type.getArrayElementType(), cutIter,
+                                                            cutPacked + 1, cutBit, cutSize));
+                        continue;
+                    }
                     buffer.emplace_back(unpackBitstream(*type.getArrayElementType(), iter, iterEnd,
-                                                        bit, dynamicSize));
+                                                        bit, dynamicSize, partial));
                 }
 
                 SLANG_ASSERT(!dynamicSize || type.getArrayElementType()->isFixedSize());
@@ -442,7 +468,7 @@ static ConstantValue unpackBitstream(const Type& type, PackIterator& iter,
             auto& fsua = ct.as<FixedSizeUnpackedArrayType>();
             auto& elem = fsua.elementType;
             for (auto width = fsua.range.width(); width > 0; width--)
-                buffer.emplace_back(unpackBitstream(elem, iter, iterEnd, bit, dynamicSize));
+                buffer.emplace_back(unpackBitstream(elem, iter, iterEnd, bit, dynamicSize, partial));
         }
 
         return constContainer(ct, buffer);
@@ -452,7 +478,8 @@ static ConstantValue unpackBitstream(const Type& type, PackIterator& iter,
         SmallVector<ConstantValue> buffer;
         auto& ct = type.getCanonicalType();
         for (auto field : ct.as<UnpackedStructType>().fields)
-            buffer.emplace_back(unpackBitstream(field->getType(), iter, iterEnd, bit, dynamicSize));
+            buffer.emplace_back(
+                unpackBitstream(field->getType(), iter, iterEnd, bit, dynamicSize, partial));
 
         return constContainer(ct, buffer);
     }
@@ -553,12 +580,22 @@ bool Bitstream::canBeTarget(const StreamingConcatenationExpression& lhs, const E
         good = targetWidth <= sourceWidth;
     }
     else {
+        // 11.4.14.3: a source longer than the target is consumed from its left end, a streaming source like any
+        // other (SVMake READINGS-b5, followup/14b), so only a source that can never supply the target's fixed items is
+        // an error here. A dynamic target's greedy item that is not whole elements is a run-time error.
         auto& source = rhs.as<StreamingConcatenationExpression>();
         sourceWidth = source.getBitstreamWidth();
-        if (lhs.isFixedSize() && source.isFixedSize())
-            good = targetWidth == sourceWidth;
-        else
-            good = dynamicSizesMatch(lhs, source);
+        if (source.isFixedSize()) {
+            good = targetWidth <= sourceWidth;
+        }
+        else {
+            auto sourceSize = dynamicBitstreamSize(source, BitstreamSizeMode::Source);
+            // (A target whose greedy form overflows can never be filled, and stays an error.)
+            auto destEmpty = dynamicBitstreamSize(lhs, BitstreamSizeMode::DestEmpty);
+            auto destFill = dynamicBitstreamSize(lhs, BitstreamSizeMode::DestFill);
+            good = sourceSize && destEmpty && destFill &&
+                   (sourceSize.multiplier > 0 || destEmpty.fixed <= sourceSize.fixed);
+        }
     }
 
     if (!good) {
@@ -835,11 +872,15 @@ static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpress
         return false;
     }
 
-    if (dynamicSize > 0 && !stream.constantWithWidth) {
-        if (withSize >= dynamicSize)
-            dynamicSize = 0;
-        else
-            dynamicSize -= *withSize;
+    if (!stream.constantWithWidth) {
+        // SVMake READINGS-b4: the fixed items after the `with` keep their bits (they are reserved out of dynamicSize),
+        // so a range needing more than what is left for it is 11.4.14.3's "more bits are needed than are provided",
+        // which ends the run (Questa, VCS): the evaluation fails.
+        if (*withSize > dynamicSize) {
+            context.addDiag(diag::BadStreamSize, withExpr.sourceRange) << *withSize << dynamicSize;
+            return false;
+        }
+        dynamicSize -= *withSize;
     }
 
     SmallVector<ConstantValue> elems;
@@ -885,14 +926,15 @@ static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpress
 static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, PackIterator& iter,
                                 const PackIterator iterEnd, uint64_t& bitOffset,
                                 uint64_t& dynamicSize, EvalContext& context,
-                                SmallVectorBase<ConstantValue>* dryRun = nullptr) {
+                                SmallVectorBase<ConstantValue>* dryRun = nullptr,
+                                bool* partial = nullptr) {
     for (auto& stream : lhs.streams()) {
         auto& operand = *stream.operand;
         if (operand.kind == ExpressionKind::Streaming) {
             auto& concat = operand.as<StreamingConcatenationExpression>();
             if (dryRun || !concat.getSliceSize()) {
                 if (!unpackConcatenation(concat, iter, iterEnd, bitOffset, dynamicSize, context,
-                                         dryRun)) {
+                                         dryRun, partial)) {
                     return false;
                 }
                 continue;
@@ -902,7 +944,7 @@ static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, Pac
             uint64_t dynamicSizeSave = dynamicSize;
             SmallVector<ConstantValue> toBeOrdered;
             if (!unpackConcatenation(concat, iter, iterEnd, bitOffset, dynamicSize, context,
-                                     &toBeOrdered)) {
+                                     &toBeOrdered, partial)) {
                 return false;
             }
 
@@ -969,7 +1011,7 @@ static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, Pac
                 }
             }
             else {
-                rvalue = unpackBitstream(arrayType, iter, iterEnd, bitOffset, dynamicSize);
+                rvalue = unpackBitstream(arrayType, iter, iterEnd, bitOffset, dynamicSize, partial);
             }
 
             if (dryRun) {
@@ -1018,40 +1060,38 @@ ConstantValue Bitstream::evaluateTarget(const StreamingConcatenationExpression& 
     if (!rvalue)
         return nullptr;
 
+    // 11.4.14.3: "If the source expression contains more bits than are needed, the appropriate number of bits shall
+    // be consumed from its left (most significant) end. However, if more bits are needed than are provided by the
+    // source expression, an error shall be generated." A streaming source is no different (SVMake READINGS-b5:
+    // followup/14b, where a longer streaming source and a dynamic one that is not whole elements are both assigned by
+    // all three commercial tools), and too short a source ends the run (Questa, VCS): the evaluation fails.
     auto srcSize = rvalue.getBitstreamWidth();
     auto targetWidth = lhs.getBitstreamWidth();
     uint64_t dynamicSize = 0;
 
-    if (rhs.kind == ExpressionKind::Streaming) {
-        // Check srcSize == targetWidth + dynamicSize, then issue an error if not.
-        dynamicSize = bitstreamCastRemainingSize(lhs, srcSize);
-        if (dynamicSize > srcSize) {
+    if (targetWidth > srcSize) {
+        auto& diag = context.addDiag(diag::BadStreamSize, lhs.sourceRange);
+        if (lhs.isFixedSize())
+            diag << targetWidth;
+        else
+            diag << formatWidth(lhs, BitstreamSizeMode::DestFill);
+        diag << srcSize;
+        return nullptr;
+    }
+
+    if (!lhs.isFixedSize()) {
+        auto elemSize = dynamicBitstreamSize(lhs, BitstreamSizeMode::DestFill);
+        if (!elemSize) {
             auto& diag = context.addDiag(diag::BadStreamSize, lhs.sourceRange);
             diag << formatWidth(lhs, BitstreamSizeMode::DestFill);
             diag << srcSize;
             return nullptr;
         }
-    }
-    else {
-        // Source size must be at least as large as the target size.
-        if (targetWidth > srcSize) {
-            context.addDiag(diag::BadStreamSize, lhs.sourceRange) << targetWidth << srcSize;
-            return nullptr;
-        }
 
-        if (!lhs.isFixedSize()) {
-            auto elemSize = dynamicBitstreamSize(lhs, BitstreamSizeMode::DestFill);
-            if (!elemSize) {
-                auto& diag = context.addDiag(diag::BadStreamSize, lhs.sourceRange);
-                diag << formatWidth(lhs, BitstreamSizeMode::DestFill);
-                diag << srcSize;
-                return nullptr;
-            }
-
-            dynamicSize = srcSize - targetWidth;
-            if (elemSize.multiplier)
-                dynamicSize -= dynamicSize % elemSize.multiplier; // do not exceed srcSize
-        }
+        // SVMake READINGS-b4: the reservation model. Every fixed item keeps its bits, so the `with` ranges and the
+        // greedy item share exactly what is left; a greedy item that is not whole elements is rounded up, zero-filled,
+        // with an error (reported below).
+        dynamicSize = srcSize - targetWidth;
     }
 
     if (lhs.getSliceSize() > 0)
@@ -1061,26 +1101,16 @@ ConstantValue Bitstream::evaluateTarget(const StreamingConcatenationExpression& 
     packBitstream(rvalue, packed);
 
     uint64_t bitOffset = 0;
+    bool partial = false;
     auto iter = std::cbegin(packed);
     auto iterEnd = std::cend(packed);
-    if (!unpackConcatenation(lhs, iter, iterEnd, bitOffset, dynamicSize, context))
+    if (!unpackConcatenation(lhs, iter, iterEnd, bitOffset, dynamicSize, context, nullptr, &partial))
         return nullptr;
 
-    // (iter==iterEnd && !bitOffset) implies target and source have exactly the same size.
-    if (iter == iterEnd) {
-        SLANG_ASSERT(dynamicSize == 0);
-        if (bitOffset > 0) {
-            // Target longer than source
-            context.addDiag(diag::BadStreamSize, lhs.sourceRange) << srcSize + bitOffset << srcSize;
-        }
-    }
-    else if (rhs.kind == ExpressionKind::Streaming) {
-        // Target shorter than source; this is legal unless rhs is a streaming concatenation.
-        SLANG_ASSERT(srcSize >= (*iter)->getBitstreamWidth());
-        auto tSize = srcSize - (*iter++)->getBitstreamWidth() + bitOffset;
-        while (iter != iterEnd)
-            tSize -= (*iter++)->getBitstreamWidth();
-        context.addDiag(diag::BadStreamSize, lhs.sourceRange) << tSize << srcSize;
+    if (partial) {
+        auto& diag = context.addDiag(diag::BadStreamSize, lhs.sourceRange);
+        diag << formatWidth(lhs, BitstreamSizeMode::DestFill);
+        diag << srcSize;
     }
 
     return rvalue;
