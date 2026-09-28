@@ -732,7 +732,8 @@ ConstantValue Bitstream::reOrder(ConstantValue&& value, uint64_t sliceSize, uint
 /// or out-of-extent position is skipped, and a bounded queue is then held to its bound (7.10.5).
 static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpression& stream,
                            const Expression& operand, PackIterator& iter, const PackIterator iterEnd,
-                           uint64_t& bitOffset, uint64_t& dynamicSize, EvalContext& context) {
+                           uint64_t& bitOffset, uint64_t& dynamicSize, EvalContext& context,
+                           SmallVectorBase<ConstantValue>* dryRun) {
     auto& arrayType = *operand.type;
     auto elemType = arrayType.getArrayElementType();
     SLANG_ASSERT(elemType);
@@ -778,15 +779,53 @@ static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpress
         auto prevQ = context.getQueueTarget();
         if (current.isQueue())
             context.setQueueTarget(&current);
-        auto range = select.evalRange(context, ConstantValue(), /* enforceBounds */ false);
-        context.setQueueTarget(prevQ);
-        if (!range)
-            return false;
-
-        if (!fixed && select.getSelectionKind() == RangeSelectionKind::Simple && range->left > range->right)
-            empty = true;
-        lo = std::min(range->left, range->right);
-        hi = std::max(range->left, range->right);
+        if (fixed) {
+            // A fixed array's declared range (and a range outside it is RangeOOB, as the run time reports it).
+            auto range = select.evalRange(context, ConstantValue(), /* enforceBounds */ false);
+            context.setQueueTarget(prevQ);
+            if (!range)
+                return false;
+            lo = std::min(range->left, range->right);
+            hi = std::max(range->left, range->right);
+        }
+        else {
+            // A queue or dynamic array's positions directly: a negative position is skipped, not a range error
+            // (evalRange with no value would report one), and a > b is the empty range (7.10.1).
+            ConstantValue cl = select.left().eval(context);
+            ConstantValue cr = select.right().eval(context);
+            context.setQueueTarget(prevQ);
+            if (!cl || !cr)
+                return false;
+            std::optional<int32_t> li = cl.integer().as<int32_t>();
+            std::optional<int32_t> ri = cr.integer().as<int32_t>();
+            if (!li || !ri) {
+                context.addDiag(diag::IndexValueInvalid, (li ? select.right() : select.left()).sourceRange)
+                    << (li ? cr : cl) << arrayType;
+                return false;
+            }
+            switch (select.getSelectionKind()) {
+                case RangeSelectionKind::Simple:
+                    lo = *li;
+                    hi = *ri;
+                    empty = *li > *ri;
+                    break;
+                case RangeSelectionKind::IndexedUp:
+                case RangeSelectionKind::IndexedDown:
+                    if (*ri <= 0) {
+                        context.addDiag(diag::RangeWidthOverflow, select.sourceRange);
+                        return false;
+                    }
+                    if (select.getSelectionKind() == RangeSelectionKind::IndexedUp) {
+                        lo = *li;
+                        hi = int64_t(*li) + *ri - 1;
+                    }
+                    else {
+                        lo = int64_t(*li) - *ri + 1;
+                        hi = *li;
+                    }
+                    break;
+            }
+        }
     }
 
     const uint64_t count = empty ? 0 : uint64_t(hi - lo + 1);
@@ -806,6 +845,13 @@ static bool unpackWithItem(const StreamingConcatenationExpression::StreamExpress
     SmallVector<ConstantValue> elems;
     for (uint64_t k = 0; k < count; k++)
         elems.emplace_back(unpackBitstream(*elemType, iter, iterEnd, bitOffset, dynamicSize));
+
+    if (dryRun) {
+        // A nested stream's dry run: the same range, the same bits, nothing stored (the real pass stores).
+        dryRun->emplace_back(ConstantValue::Elements(std::make_move_iterator(elems.begin()),
+                                                     std::make_move_iterator(elems.end())));
+        return true;
+    }
 
     if (!fixed && !empty && hi >= 0 && current.size() <= uint64_t(hi)) {
         // When the array is a variable-size array, it shall be resized to accommodate the range expression.
@@ -879,8 +925,8 @@ static bool unpackConcatenation(const StreamingConcatenationExpression& lhs, Pac
             SLANG_ASSERT(dynamicSizeSave == dynamicSize);
             SLANG_ASSERT(iterConcat == std::cend(packed) && !bit);
         }
-        else if (stream.withExpr && !dryRun) {
-            if (!unpackWithItem(stream, operand, iter, iterEnd, bitOffset, dynamicSize, context))
+        else if (stream.withExpr) {
+            if (!unpackWithItem(stream, operand, iter, iterEnd, bitOffset, dynamicSize, context, dryRun))
                 return false;
         }
         else {

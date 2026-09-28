@@ -14,6 +14,7 @@
 #include "slang/ast/Patterns.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/expressions/SelectExpressions.h"
 #include "slang/ast/statements/ConditionalStatements.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
@@ -2343,8 +2344,10 @@ Expression& StreamingConcatenationExpression::fromSyntax(
         if (argSyntax->withRange) {
             // The expression before the with can be any one-dimensional unpacked array
             // (including a queue).
+            // SVMake K-458: ONE-dimensional (11.4.14.4) -- an element that is itself an unpacked array is refused.
             if (!argType->isUnpackedArray() || argType->isAssociativeArray() ||
-                !argType->getArrayElementType()->isFixedSize()) {
+                !argType->getArrayElementType()->isFixedSize() ||
+                argType->getArrayElementType()->isUnpackedArray()) {
                 context.addDiag(diag::BadStreamWithType, arg.sourceRange);
                 return badResult();
             }
@@ -2359,8 +2362,16 @@ Expression& StreamingConcatenationExpression::fromSyntax(
             // max size checking on them.
             EvalContext evalCtx(context);
             auto range = withExpr->evalSelector(evalCtx, /* enforceBounds */ false);
-            if (range)
-                constantWithWidth = range->width();
+            if (range) {
+                // SVMake K-458: a reversed simple range on a queue or dynamic array is the EMPTY range (7.10.1), so its
+                // constant width is 0 -- as the unpack consumes nothing for it.
+                const bool reversed = !argType->hasFixedRange() &&
+                                      withExpr->kind == ExpressionKind::RangeSelect &&
+                                      withExpr->as<RangeSelectExpression>().getSelectionKind() ==
+                                          RangeSelectionKind::Simple &&
+                                      range->left > range->right;
+                constantWithWidth = reversed ? 0 : range->width();
+            }
         }
 
         if (argSyntax->expression->kind != SyntaxKind::StreamingConcatenationExpression) {
