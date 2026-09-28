@@ -2482,6 +2482,37 @@ endmodule
     CHECK(e.getValue().integer() == 8);
 }
 
+TEST_CASE("SVMake EXPR-i: type(type(e)) is type(e)") {
+    // A.2.2.1: type(type(e)) is the type of a data_type, so it refers to e's type; 6.23 makes two type references
+    // equal only when the types match. It used to be the type-reference type and compared unequal.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    int v;
+    logic [3:0] l;
+    localparam int a = type(type(v + 1)) == type(v + 1);
+    localparam int b = type(type(v)) === type(int);
+    localparam int c = type(type(l)) == type(bit [3:0]);
+    function int f;
+        case (type(v + 13))
+            type(type(v + 18 - 40)): return 1;
+            default: return 0;
+        endcase
+    endfunction
+    localparam int d = f();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(root.lookupName<ParameterSymbol>("m.a").getValue().integer() == 1);
+    CHECK(root.lookupName<ParameterSymbol>("m.b").getValue().integer() == 1);
+    CHECK(root.lookupName<ParameterSymbol>("m.c").getValue().integer() == 0);
+    CHECK(root.lookupName<ParameterSymbol>("m.d").getValue().integer() == 1);
+}
+
 TEST_CASE("Casting with type references") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
