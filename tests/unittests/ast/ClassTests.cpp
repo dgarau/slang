@@ -3,8 +3,13 @@
 
 #include "Test.h"
 
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/EvalContext.h"
 #include "slang/ast/Expression.h"
+#include "slang/ast/Statement.h"
+#include "slang/ast/statements/MiscStatements.h"
+#include "slang/ast/expressions/AssignmentExpressions.h"
+#include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/symbols/ClassSymbols.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
@@ -4143,4 +4148,58 @@ endmodule
     auto& diags = compilation.getAllDiagnostics();
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::MissingConstraintBlock);
+}
+
+TEST_CASE("rand_mode on a rand class handle is the variable's mode (SVMake READINGS-b2)") {
+    // 18.8's object.random_variable form: a rand handle property (or an element of one) is a
+    // random variable, so rand_mode on it binds the member form -- with a function form too --
+    // rather than the handle's object's own built-in task. Questa, Xcelium and VCS read it so.
+    auto tree = SyntaxTree::fromText(R"(
+class Item;
+    rand int val;
+endclass
+class Holder;
+    rand Item items[2];
+    rand Item one;
+    Item plain;
+    function void f();
+        int m;
+        items[0].rand_mode(0);
+        m = items[1].rand_mode();
+        one.rand_mode(1);
+        m = one.rand_mode();
+        plain.rand_mode(0);
+    endfunction
+endclass
+module top;
+    Holder h = new;
+    int m;
+    initial begin
+        h.items[0].rand_mode(0);
+        m = h.items[0].rand_mode();
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    // Every rand_mode call, in source order: whether it bound the member form (a system call).
+    std::vector<bool> system;
+    compilation.getRoot().visit(makeVisitor([&](auto& visitor, const CallExpression& call) {
+        if (call.getSubroutineName() == "rand_mode")
+            system.push_back(call.isSystemCall());
+        visitor.visitDefault(call);
+    }));
+    // In Holder::f: items[0], items[1] (getter), one, one (getter) -- the variable's; plain -- its
+    // object's built-in task. In top: h.items[0] and its getter -- the variable's.
+    REQUIRE(system.size() == 7);
+    CHECK(system[0]);
+    CHECK(system[1]);
+    CHECK(system[2]);
+    CHECK(system[3]);
+    CHECK(!system[4]);
+    CHECK(system[5]);
+    CHECK(system[6]);
 }
