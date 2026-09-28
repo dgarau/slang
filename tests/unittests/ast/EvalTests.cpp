@@ -2193,18 +2193,102 @@ endfunction
     CHECK(cv1.elements()[1].integer() == "8'sh56"_si);
     CHECK(cv1.elements()[2].integer() == "8'sh48"_si);
 
-    auto cv2 = session.eval("foo2(ft'({<<5{12'habc}}))");
-    CHECK(cv2.elements().size() == 2);
-    CHECK(cv2.elements()[0].elements().size() == 1);
-    CHECK(cv2.elements()[0].elements()[0].integer() == "8'sh2b"_si);   // READINGS-a1 (K-434)
-    CHECK(cv2.elements()[1].integer() == 1);
-
     auto cv3 = session.eval("foo3({1'b1})");
     CHECK(cv3.elements().size() == 2);
     CHECK(cv3.elements()[0].elements().empty());
     CHECK(cv3.elements()[1].integer() == 1);
 
     NO_SESSION_ERRORS;
+
+    // SVMake READINGS-b4 (followup/14a, all three commercial tools): the greedy byte[] keeps only the 11 bits left
+    // after the reserved bit b, rounded UP to two bytes with the last zero-filled -- which is an error, and the
+    // assignment is still made. The 12 bits are cut into 6-bit blocks from the right (READINGS-a1, K-434).
+    auto cv2 = session.eval("foo2(ft'({<<5{12'habc}}))");
+    CHECK(cv2.elements().size() == 2);
+    CHECK(cv2.elements()[0].elements().size() == 2);
+    CHECK(cv2.elements()[0].elements()[0].integer() == "8'sh5b"_si);
+    CHECK(cv2.elements()[0].elements()[1].integer() == "8'sh80"_si);
+    CHECK(cv2.elements()[1].integer() == 1);
+
+    auto diags = session.getDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::BadStreamSize);
+}
+
+TEST_CASE("SVMake READINGS-b5: an unpack's source sizes (11.4.14.3, followup/14b)") {
+    ScriptSession session;
+    session.eval(R"(
+typedef byte fa_t[4];
+function fa_t w4();
+    byte fa[4], q1[$];
+    bit [3:0] n;
+    q1 = '{8'h01, 8'h02, 8'h03};
+    n = 4'h7;
+    {>>{fa with [0 +: 2], n}} = {>>{q1}};
+    return '{fa[0], fa[1], fa[2], 8'(n)};
+endfunction
+
+typedef byte q_t[$];
+function q_t g3();
+    byte q[$], q1[$];
+    byte b;
+    q1 = '{8'hAB, 8'hCD, 8'hE0};
+    b = 8'h77;
+    {>>{q, b}} = {>>{q1, 4'hF}};
+    q.push_back(b);
+    return q;
+endfunction
+
+function int l1();
+    byte q5[$];
+    int x;
+    q5 = '{8'h01, 8'h02, 8'h03, 8'h04, 8'h05};
+    {>>{x}} = {>>{q5}};
+    return x;
+endfunction
+
+function int s2();
+    byte q2[$];
+    int x;
+    q2 = '{8'h01, 8'h02};
+    x = 32'h77;
+    {>>{x}} = q2;
+    return x;
+endfunction
+
+function byte w1();
+    byte len, crc, pay[];
+    {>>{len, pay with [0 +: len], crc}} = 24'h02_AABB;
+    return len;
+endfunction
+)");
+
+    // W4: a longer streaming source into a constant `with` and a nibble, consumed from the left.
+    auto w4 = session.eval("w4()");
+    CHECK(w4.elements()[0].integer() == "8'sh1"_si);
+    CHECK(w4.elements()[1].integer() == "8'sh2"_si);
+    CHECK(w4.elements()[2].integer() == "8'sh0"_si);
+    CHECK(w4.elements()[3].integer() == "8'sh0"_si);
+
+    // L1: 40 bits into an int, consumed from the left.
+    CHECK(session.eval("l1()").integer() == 0x01020304);
+    NO_SESSION_ERRORS;
+
+    // G3: b's byte is reserved, and q takes the 20 bits left, rounded up with an error (Questa, VCS).
+    auto g3 = session.eval("g3()");
+    REQUIRE(g3.queue()->size() == 4);
+    CHECK((*g3.queue())[0].integer() == "8'shab"_si);
+    CHECK((*g3.queue())[1].integer() == "8'shcd"_si);
+    CHECK((*g3.queue())[2].integer() == "8'she0"_si);
+    CHECK((*g3.queue())[3].integer() == "8'sh0f"_si);
+    auto diags = session.getDiagnostics();
+    INFO(report(diags));
+    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.isError(); }) == 1);
+    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.code == diag::BadStreamSize; }) == 1);
+
+    // S2, W1: more bits are needed than the source provides -- the run ends, so the evaluation fails.
+    CHECK(!session.eval("s2()"));
+    CHECK(!session.eval("w1()"));
 }
 
 TEST_CASE("Recursive function call") {

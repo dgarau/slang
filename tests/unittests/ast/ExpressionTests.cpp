@@ -1699,13 +1699,10 @@ TEST_CASE("Streaming operators") {
         {"int a; real b; assign {<< 2 {a}} = b;", diag::BadStreamSourceType},
         {"int a; shortint b; assign {<< 2 {a}} = b;", diag::BadStreamSize},
         {"int a; shortint b; assign b = {<< 4 {a}};", diag::BadStreamSize},
-        {"int a; shortint b; assign {>>{b}} = {<< 4 {a}};", diag::BadStreamSize},
         {"int a; real b = real'({<< 4 {a}});", diag::BadStreamCast},
         {"int a; shortint b = shortint'({<< 4 {a}});", diag::BadStreamCast},
         {"typedef struct {byte a[$]; bit b;} dest_t; int a; dest_t b = dest_t'({<<{a}});",
          diag::BadStreamCast},
-        {"typedef struct {byte a[$]; bit b;} dest_t;int a;dest_t b;assign {>>{b}}={<<{a}};",
-         diag::BadStreamSize},
 
         {"localparam string s=\"AB\"; localparam byte j= {<<2{s}};", diag::BadStreamSize},
         {"localparam string s=\"AB\"; localparam int j= byte'({<<{s}}) - 5;",
@@ -1724,15 +1721,6 @@ function int foo(byte bar[]);
     return a;
 endfunction
 localparam t=foo("AB");
-)",
-         diag::BadStreamSize},
-        {R"(
-function int foo(byte bar[]);
-    int a;
-    {>>{a}} = {<<{bar}};
-return a;
-endfunction
-localparam t=foo("ABCDE");
 )",
          diag::BadStreamSize},
 
@@ -1775,6 +1763,18 @@ module sub(input byte b);
     }
 
     std::string legal[] = {
+        // SVMake READINGS-b5 (followup/14b): 11.4.14.3 consumes a longer source from its left end, a streaming
+        // source like any other, and a greedy item that is not whole elements is a run-time error.
+        "int a; shortint b; assign {>>{b}} = {<< 4 {a}};",
+        "typedef struct {byte a[$]; bit b;} dest_t;int a;dest_t b;assign {>>{b}}={<<{a}};",
+        R"(
+function int foo(byte bar[]);
+    int a;
+    {>>{a}} = {<<{bar}};
+return a;
+endfunction
+localparam t=foo("ABCDE");
+)",
         "int a = 0; byte b[4] = {<<3{a}};", "int a; byte b[4]; assign {<<3{b}} = a;",
         "int a; byte b[4]; assign {<<3{b}} = {<<5{a}};",
         "byte b[4] = '{default:0}; int a = int'({<<3{b}}) + 5;",
@@ -1817,7 +1817,6 @@ TEST_CASE("Stream expression with") {
         {"byte b[0:3] = '{default:0}; int a = {<<3{b with[2:5]}};", diag::RangeOOB},
         {"byte b[]; int a = {<<3{b with[3:2]}};", diag::RangeSelectReversed},
         {"byte b[], c[4]; always {>>{b, {<<3{c with[b[0]:b[1]]}}}} = 9;", diag::BadStreamWithOrder},
-        {"int a[],b[],c[];bit d;always {>>{b}}={<<{a with [2+:3],c,d}};", diag::BadStreamSize},
     };
 
     for (const auto& test : illegal) {
@@ -1826,6 +1825,9 @@ TEST_CASE("Stream expression with") {
     }
 
     std::string legal[] = {
+        // SVMake READINGS-b5: a source that is never whole elements of the greedy b is a run-time error, not a
+        // compile-time one (all three commercial tools elaborate followup/14b's G3).
+        "int a[],b[],c[];bit d;always {>>{b}}={<<{a with [2+:3],c,d}};",
         R"(
 int i_header, i_len,  i_crc, o_header, o_len, o_crc;
 byte i_data[], o_data[];
@@ -1853,7 +1855,8 @@ endfunction
 localparam ft b = foo(24'h123456,
 )";
 
-    CHECK(testBitstream(foo + "2);", diag::BadStreamSize) == 1);
+    // SVMake READINGS-b5: 16 of the 24 bits, consumed from the left (11.4.14.3).
+    CHECK(testBitstream(foo + "2);") == 0);
     CHECK(testBitstream(foo + "3);") == 0);
     CHECK(testBitstream(foo + "4);", diag::BadStreamSize) == 1);
 
