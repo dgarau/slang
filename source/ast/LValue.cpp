@@ -191,9 +191,25 @@ void LValue::store(const ConstantValue& newValue) {
         auto& src = *newValue.queue();
         auto& dest = *target->queue();
 
-        u = std::min(u, int32_t(dest.size()));
-        for (int32_t i = std::max(l, 0); i <= u; i++)
-            dest[size_t(i)] = src[size_t(i - l)];
+        // SVMake READINGS-a2 (K-395, as VCS answers every row): a slice write names b-a+1
+        // elements, a source of any other count is 7.6's error and no operation, and each element
+        // is an element write -- in range it is written, at the current size it appends (7.10.1's
+        // $+1), anywhere else it is ignored. A reversed slice is empty. The clamp this replaces
+        // also wrote one past the end of `dest`.
+        if (range->left > range->right || src.size() != size_t(int64_t(u) - l + 1))
+            return;
+        for (int32_t i = l; i <= u; i++) {
+            auto& elem = src[size_t(int64_t(i) - l)];
+            if (i < 0)
+                continue;
+            if (size_t(i) < dest.size()) {
+                dest[size_t(i)] = elem;
+            }
+            else if (size_t(i) == dest.size()) {
+                dest.push_back(elem);
+                dest.resizeToBound();
+            }
+        }
     }
     else {
         int32_t l = range->lower();
@@ -202,7 +218,7 @@ void LValue::store(const ConstantValue& newValue) {
         auto src = newValue.elements();
         auto dest = target->elements();
 
-        u = std::min(u, int32_t(dest.size()));
+        u = std::min(u, int32_t(dest.size()) - 1);
         for (int32_t i = std::max(l, 0); i <= u; i++)
             dest[size_t(i)] = src[size_t(i - l)];
     }

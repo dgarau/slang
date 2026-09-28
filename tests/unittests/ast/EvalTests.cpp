@@ -3007,3 +3007,66 @@ endfunction
 
     NO_SESSION_ERRORS;
 }
+
+TEST_CASE("Nested foreach live sizes, x ordering in min/max, queue slice writes (SVMake READINGS-a2)") {
+    // K-051 at every depth: a body removing from an inner row, or removing the outer row it is
+    // walking, visits the live sizes (the removed row is the empty container).
+    // K-387: an unknown key orders below every known key (Questa, VCS, Riviera-PRO).
+    // K-395: a slice write names b-a+1 elements, each an element write that appends at the
+    // current size (VCS); a reversed slice is empty, and the old clamp wrote past the end.
+    ScriptSession session;
+    session.eval(R"(
+function automatic int inner_row();
+    int qq[$][$] = '{'{1,2,3}, '{4,5,6}}; int n = 0;
+    foreach (qq[i, j]) begin n++; if (j == 0) qq[i].delete(2); end
+    return n;
+endfunction
+function automatic int outer_row();
+    int qq[$][$] = '{'{1,2,3}, '{4,5,6}, '{7,8,9}}; int n = 0;
+    foreach (qq[i, j]) begin n++; if (i == 0 && j == 0) qq.delete(0); end
+    return n;
+endfunction
+function automatic int fixed_of_queues();
+    int fq[2][$] = '{'{1,2,3}, '{4,5,6}}; int n = 0;
+    foreach (fq[i, j]) begin n++; if (j == 0) fq[i].pop_back(); end
+    return n;
+endfunction
+function automatic logic [3:0] mn(int sel);
+    logic [3:0] a[$] = '{4'b0011, 4'bx000}; logic [3:0] r[$];
+    if (sel) r = a.max(); else r = a.min();
+    return r[0];
+endfunction
+function automatic int slice_appends();
+    int q[$] = '{1,2,3,4,5}; int src[$] = '{7,8,9};
+    q[3:5] = src;
+    return q.size() * 100 + q[q.size()-1];
+endfunction
+function automatic int slice_count_mismatch();
+    int q[$] = '{1,2,3,4,5}; int src[$] = '{7,8};
+    q[1:3] = src;
+    return q[1] * 10 + q[2];
+endfunction
+function automatic int slice_past_end();
+    int q[$] = '{1,2}; int src[$] = '{7,8,9};
+    q[3:5] = src;
+    return q.size();
+endfunction
+function automatic int slice_bounded();
+    int q[$:3] = '{1,2,3}; int src[$] = '{7,8,9};
+    q[2:4] = src;
+    return q.size() * 100 + q[3];
+endfunction
+)");
+
+    CHECK(session.eval("inner_row()").integer() == 4);
+    CHECK(session.eval("outer_row()").integer() == 6);
+    CHECK(session.eval("fixed_of_queues()").integer() == 4);
+    CHECK(exactlyEqual(session.eval("mn(0)").integer(), "4'bx000"_si));
+    CHECK(session.eval("mn(1)").integer() == "4'b0011"_si);
+    CHECK(session.eval("slice_appends()").integer() == 609);
+    CHECK(session.eval("slice_count_mismatch()").integer() == 23);
+    CHECK(session.eval("slice_past_end()").integer() == 2);
+    CHECK(session.eval("slice_bounded()").integer() == 408);
+
+    NO_SESSION_ERRORS;
+}
