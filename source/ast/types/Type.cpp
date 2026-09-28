@@ -1215,6 +1215,12 @@ const Type& Type::fromSyntax(Compilation& compilation, const DataTypeSyntax& nod
 
                 if (expr.type->isVoid())
                     context.addDiag(diag::TypeRefVoid, exprSyntax.sourceRange());
+
+                // SVMake EXPR-i: `type(type(e))` is the type of a data_type (A.2.2.1's type_reference), so it is
+                // the referenced type -- not the type-reference type an inner type() binds as where the context
+                // allows type references (a case item, a comparison operand). 6.23: equal only if the types match.
+                if (expr.kind == ExpressionKind::TypeReference)
+                    return expr.as<TypeReferenceExpression>().targetType;
             }
 
             return *expr.type;
