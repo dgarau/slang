@@ -213,8 +213,21 @@ public:
     }
 
 private:
+    /// One step from the array down to the level a nested dimension walks: a position in a queue
+    /// or an unpacked array, or a key of an associative array. `known` is false below a skipped
+    /// dimension, whose position is not tracked.
+    struct PathStep {
+        ConstantValue key;
+        size_t pos = 0;
+        bool isKey = false;
+        bool known = true;
+    };
+
     EvalResult evalRecursive(EvalContext& context, const ConstantValue& cv,
-                             std::span<const LoopDim> loopDims) const;
+                             std::span<const LoopDim> loopDims,
+                             SmallVector<PathStep>& path) const;
+    ConstantValue rereadLevel(EvalContext& context, std::span<const PathStep> path,
+                              bool& missing) const;
 };
 
 /// Represents a `while` loop statement.

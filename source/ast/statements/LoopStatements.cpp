@@ -442,23 +442,91 @@ ER ForeachLoopStatement::evalImpl(EvalContext& context) const {
     if (!cv)
         return ER::Fail;
 
-    ER result = evalRecursive(context, cv, loopDims);
+    SmallVector<PathStep> path;
+    ER result = evalRecursive(context, cv, loopDims, path);
     if (result == ER::Break || result == ER::Continue)
         return ER::Success;
 
     return result;
 }
 
+// Re-derives the level `path` names from the array's CURRENT value (SVMake READINGS-a1/a2, K-051):
+// a queue, dynamic array or string level is walked to its live size at every test, at any depth,
+// as Questa, VCS and Riviera-PRO do. A row the body removed is the empty container (`missing`).
+ConstantValue ForeachLoopStatement::rereadLevel(EvalContext& context,
+                                                std::span<const PathStep> path,
+                                                bool& missing) const {
+    missing = false;
+    ConstantValue current = arrayRef.eval(context);
+    if (!current)
+        return nullptr;
+
+    for (auto& step : path) {
+        ConstantValue next;
+        if (step.isKey) {
+            if (current.isMap()) {
+                auto& map = *current.map();
+                if (auto it = map.find(step.key); it != map.end())
+                    next = it->second;
+            }
+        }
+        else if (current.isQueue()) {
+            auto& q = *current.queue();
+            if (step.pos < q.size())
+                next = q[step.pos];
+        }
+        else if (current.isUnpacked()) {
+            auto elems = current.elements();
+            if (step.pos < elems.size())
+                next = elems[step.pos];
+        }
+
+        if (!next) {
+            missing = true;
+            return nullptr;
+        }
+        current = std::move(next);
+    }
+    return current;
+}
+
 ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue& cv,
-                                       std::span<const LoopDim> currDims) const {
+                                       std::span<const LoopDim> currDims,
+                                       SmallVector<PathStep>& path) const {
     // If there is no loop var just skip this index.
     auto& dim = currDims[0];
     if (!dim.loopVar) {
         // Shouldn't ever be at the end here.
-        return evalRecursive(context, nullptr, currDims.subspan(1));
+        path.push_back(PathStep{.known = false});
+        auto result = evalRecursive(context, nullptr, currDims.subspan(1), path);
+        path.pop_back();
+        return result;
     }
 
     auto local = context.createLocal(dim.loopVar);
+
+    // The bound of a queue, dynamic array or string level is its LIVE size at every test, at any
+    // depth (SVMake READINGS-a1/a2, K-051), where it walked a snapshot. It needs every step above it
+    // to be known; below a skipped dimension the snapshot is kept.
+    bool live = true;
+    for (auto& step : path)
+        live &= step.known;
+
+    // Reads the level again for the test at position i > 0. Returns false to stop the walk (a
+    // removed row is the empty container); `fail` is set when the array itself cannot be read.
+    auto reread = [&](ConstantValue& current, bool& fail) {
+        bool missing = false;
+        current = rereadLevel(context, path, missing);
+        fail = !current && !missing;
+        return bool(current);
+    };
+
+    auto descend = [&](const ConstantValue& elem, PathStep step) {
+        path.push_back(std::move(step));
+        auto result = evalRecursive(context, elem, currDims.subspan(1), path);
+        path.pop_back();
+        return result;
+    };
 
     // If this is an associative array, looping happens over the keys.
     if (cv.isMap()) {
@@ -468,7 +536,7 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
 
             ER result;
             if (currDims.size() > 1)
-                result = evalRecursive(context, val, currDims.subspan(1));
+                result = descend(val, PathStep{.key = key, .isKey = true});
             else
                 result = body.eval(context);
 
@@ -477,15 +545,16 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
         }
     }
     else if (cv.isQueue()) {
-        // The bound is the queue's LIVE size at every test when this is the outermost dimension
-        // (SVMake READINGS-a1, K-051): a body that deletes from the queue it walks visits the
-        // remaining elements, as Questa, VCS and Riviera-PRO do, rather than walking a snapshot.
-        const bool live = currDims.size() == loopDims.size();
         ConstantValue current = cv;
         for (size_t i = 0;; i++) {
             if (live && i > 0) {
-                current = arrayRef.eval(context);
-                if (!current || !current.isQueue())
+                bool fail = false;
+                if (!reread(current, fail)) {
+                    if (fail)
+                        return ER::Fail;
+                    break;
+                }
+                if (!current.isQueue())
                     return ER::Fail;
             }
             auto& q = *current.queue();
@@ -495,7 +564,7 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
 
             ER result;
             if (currDims.size() > 1)
-                result = evalRecursive(context, q[i], currDims.subspan(1));
+                result = descend(q[i], PathStep{.pos = i});
             else
                 result = body.eval(context);
 
@@ -506,13 +575,16 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
     else if (cv.isString()) {
         SLANG_ASSERT(currDims.size() == 1);
 
-        // The live length, as for a queue above (K-051).
-        const bool live = currDims.size() == loopDims.size();
         ConstantValue current = cv;
         for (size_t i = 0;; i++) {
             if (live && i > 0) {
-                current = arrayRef.eval(context);
-                if (!current || !current.isString())
+                bool fail = false;
+                if (!reread(current, fail)) {
+                    if (fail)
+                        return ER::Fail;
+                    break;
+                }
+                if (!current.isString())
                     return ER::Fail;
             }
             if (i >= current.str().size())
@@ -525,26 +597,29 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
         }
     }
     else {
-        // A dynamic array at the outermost dimension: its live size at every test (K-051), as
-        // for a queue above -- `d = new[2]` in the body shortens the walk.
-        if (!dim.range && currDims.size() == loopDims.size()) {
+        // A dynamic array: its live size at every test, as for a queue above -- `d = new[2]` in
+        // the body shortens the walk.
+        if (!dim.range && live) {
             ConstantValue current = cv;
             for (size_t i = 0;; i++) {
                 if (i > 0) {
-                    current = arrayRef.eval(context);
-                    if (!current)
-                        return ER::Fail;
+                    bool fail = false;
+                    if (!reread(current, fail)) {
+                        if (fail)
+                            return ER::Fail;
+                        break;
+                    }
                 }
-                std::span<const ConstantValue> live;
+                std::span<const ConstantValue> elems;
                 if (current.isUnpacked())
-                    live = current.elements();
-                if (i >= live.size())
+                    elems = current.elements();
+                if (i >= elems.size())
                     break;
                 *local = SVInt(32, i, true);
 
                 ER result;
                 if (currDims.size() > 1)
-                    result = evalRecursive(context, live[i], currDims.subspan(1));
+                    result = descend(elems[i], PathStep{.pos = i});
                 else
                     result = body.eval(context);
 
@@ -580,8 +655,8 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
                 if (dim.range)
                     index = (size_t)range.reverse().translateIndex(i);
 
-                result = evalRecursive(context, elements.empty() ? nullptr : elements[index],
-                                       currDims.subspan(1));
+                result = descend(elements.empty() ? nullptr : elements[index],
+                                 PathStep{.pos = index, .known = !elements.empty()});
             }
             else {
                 result = body.eval(context);

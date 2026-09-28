@@ -424,13 +424,13 @@ public:
                 auto cv = iterExpr->eval(context);
 
                 if (isMin) {
-                    if (cv < val) {
+                    if (orderedBefore(cv, val)) {
                         val = cv;
                         elem = *it;
                     }
                 }
                 else {
-                    if (val < cv) {
+                    if (orderedBefore(val, cv)) {
                         val = cv;
                         elem = *it;
                     }
@@ -443,11 +443,11 @@ public:
             ConstantValue elem = *it;
             for (++it; it != end(arr); ++it) {
                 if (isMin) {
-                    if (*it < elem)
+                    if (orderedBefore(*it, elem))
                         elem = *it;
                 }
                 else {
-                    if (elem < *it)
+                    if (orderedBefore(elem, *it))
                         elem = *it;
                 }
             }
@@ -459,6 +459,19 @@ public:
 
 private:
     bool isMin;
+
+    // A key with an unknown bit orders below every known key, and two unknown keys are unordered
+    // (SVMake READINGS-a2, K-387): {4'b0011, 4'bx000}.min() is x000 and .max() is 0011, as Questa,
+    // VCS and Riviera-PRO answer. `<` alone makes an unknown key never win.
+    static bool orderedBefore(const ConstantValue& a, const ConstantValue& b) {
+        if (a.isInteger() && b.isInteger()) {
+            const bool aUnknown = a.integer().hasUnknown();
+            const bool bUnknown = b.integer().hasUnknown();
+            if (aUnknown || bUnknown)
+                return aUnknown && !bUnknown;
+        }
+        return a < b;
+    }
 };
 
 class ArrayUniqueMethod : public SystemSubroutine {
