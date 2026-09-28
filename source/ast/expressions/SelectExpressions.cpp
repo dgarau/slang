@@ -930,6 +930,21 @@ Expression& MemberAccessExpression::fromSelector(
             if (auto base = ct.getBaseClass(); base && base->isError())
                 return badExpr(comp, &expr);
 
+            // A 'rand' class handle property (or an element of one) is itself a random
+            // variable, so 'h.items[0].rand_mode(...)' is 18.8's object.random_variable form:
+            // the handle VARIABLE's mode, not every random variable of the object it holds.
+            // The class's own built-in rand_mode would otherwise be found first (SVMake
+            // READINGS-b2, K-367: Questa, Xcelium and VCS all read it as the variable).
+            if (selector.name == "rand_mode"sv) {
+                if (auto sym = expr.getSymbolReference();
+                    sym && sym->getRandMode() != RandMode::None) {
+                    if (auto result = tryBindSpecialMethod(comp, expr, selector, invocation,
+                                                           withClause, context)) {
+                        return *result;
+                    }
+                }
+            }
+
             scope = &ct;
             break;
         }
