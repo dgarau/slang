@@ -2229,14 +2229,15 @@ endfunction
 
     auto cv1 = session.eval("foo1({24'h123456, 2'b11})");
     CHECK(cv1.elements().size() == 3);
-    CHECK(cv1.elements()[0].integer() == "8'sh65"_si);
-    CHECK(cv1.elements()[1].integer() == "8'sh12"_si);
-    CHECK(cv1.elements()[2].integer() == "8'sh29"_si);
+    // SVMake READINGS-a1 (K-434): an unpack's blocks are cut from the right, as a pack's are.
+    CHECK(cv1.elements()[0].integer() == "8'sh43"_si);
+    CHECK(cv1.elements()[1].integer() == "8'sh56"_si);
+    CHECK(cv1.elements()[2].integer() == "8'sh48"_si);
 
     auto cv2 = session.eval("foo2(ft'({<<5{12'habc}}))");
     CHECK(cv2.elements().size() == 2);
     CHECK(cv2.elements()[0].elements().size() == 1);
-    CHECK(cv2.elements()[0].elements()[0].integer() == "8'sh5c"_si);
+    CHECK(cv2.elements()[0].elements()[0].integer() == "8'sh2b"_si);   // READINGS-a1 (K-434)
     CHECK(cv2.elements()[1].integer() == 1);
 
     auto cv3 = session.eval("foo3({1'b1})");
@@ -2316,18 +2317,19 @@ endfunction
 
     auto cv1 = session.eval("foo1({24'h123456, 2'b11}, \"ABCDEF\")");
     CHECK(cv1.elements().size() == 6);
-    CHECK(cv1.elements()[0].integer() == "8'sh65"_si);
-    CHECK(cv1.elements()[1].integer() == "8'sh12"_si);
-    CHECK(cv1.elements()[2].integer() == "8'sh29"_si);
+    // SVMake READINGS-a1 (K-434): an unpack's blocks are cut from the right, as a pack's are.
+    CHECK(cv1.elements()[0].integer() == "8'sh43"_si);
+    CHECK(cv1.elements()[1].integer() == "8'sh56"_si);
+    CHECK(cv1.elements()[2].integer() == "8'sh48"_si);
     CHECK(cv1.elements()[3].integer() == 'B');
     CHECK(cv1.elements()[4].integer() == 'D');
     CHECK(cv1.elements()[5].integer() == 'C');
 
     auto cv2 = session.eval("foo2({24'h123456, 2'b11}, \"ABCDEF\")");
     CHECK(cv2.elements().size() == 6);
-    CHECK(cv2.elements()[0].integer() == "8'sh65"_si);
-    CHECK(cv2.elements()[1].integer() == "8'sh12"_si);
-    CHECK(cv2.elements()[2].integer() == "8'sh29"_si);
+    CHECK(cv2.elements()[0].integer() == "8'sh43"_si);
+    CHECK(cv2.elements()[1].integer() == "8'sh56"_si);
+    CHECK(cv2.elements()[2].integer() == "8'sh48"_si);
     CHECK(cv2.elements()[3].integer() == 'B');
     CHECK(cv2.elements()[4].integer() == 'D');
     CHECK(cv2.elements()[5].integer() == 'C');
@@ -2958,4 +2960,50 @@ TEST_CASE("Eval scalar bit select") {
     CHECK(diags[0].code == diag::CannotIndexScalar);
     CHECK(diags[1].code == diag::CannotIndexScalar);
     CHECK(diags[2].code == diag::CannotIndexScalar);
+}
+
+TEST_CASE("Unpack slices as a pack; foreach reads the live size (SVMake READINGS-a1)") {
+    // K-434: every simulator measured (Questa, Xcelium, VCS, Riviera-PRO) cuts an unpack's blocks
+    // from the right, as a pack does: 10|110|110 reversed gives a4 = 1101, b4 = 1010.
+    // K-051: a body that deletes from the queue it walks visits the live size (4, not 5), and a
+    // string or dynamic array replaced in the body likewise.
+    ScriptSession session;
+    session.eval(R"(
+function automatic logic [7:0] unpack3();
+    logic [3:0] a4, b4;
+    {<<3{a4, b4}} = 8'b1011_0110;
+    return {a4, b4};
+endfunction
+function automatic logic [7:0] nested();
+    logic [2:0] c3; logic [4:0] c5;
+    {<<3{{<<2{c3}}, c5}} = 8'b1100_1010;
+    return {c3, c5};
+endfunction
+function automatic int deletes();
+    int q[$] = '{10, 11, 12, 13, 14};
+    int v = 0;
+    foreach (q[i]) begin v++; if (i == 1) q.delete(1); end
+    return v;
+endfunction
+function automatic int shrinks();
+    int d[] = new[4];
+    int v = 0;
+    foreach (d[i]) begin v++; if (i == 0) d = new[2]; end
+    return v;
+endfunction
+function automatic int string_grows();
+    string s = "abc";
+    int v = 0;
+    foreach (s[i]) begin v++; if (i == 0) s = "abcdefg"; end
+    return v;
+endfunction
+)");
+
+    CHECK(session.eval("unpack3()").integer() == "8'b11011010"_si);
+    CHECK(session.eval("nested()").integer() == "8'b10000111"_si);
+    CHECK(session.eval("deletes()").integer() == 4);
+    CHECK(session.eval("shrinks()").integer() == 2);
+    CHECK(session.eval("string_grows()").integer() == 7);
+
+    NO_SESSION_ERRORS;
 }

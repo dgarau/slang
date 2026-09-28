@@ -477,8 +477,20 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
         }
     }
     else if (cv.isQueue()) {
-        auto& q = *cv.queue();
-        for (size_t i = 0; i < q.size(); i++) {
+        // The bound is the queue's LIVE size at every test when this is the outermost dimension
+        // (SVMake READINGS-a1, K-051): a body that deletes from the queue it walks visits the
+        // remaining elements, as Questa, VCS and Riviera-PRO do, rather than walking a snapshot.
+        const bool live = currDims.size() == loopDims.size();
+        ConstantValue current = cv;
+        for (size_t i = 0;; i++) {
+            if (live && i > 0) {
+                current = arrayRef.eval(context);
+                if (!current || !current.isQueue())
+                    return ER::Fail;
+            }
+            auto& q = *current.queue();
+            if (i >= q.size())
+                break;
             *local = SVInt(32, i, true);
 
             ER result;
@@ -494,8 +506,17 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
     else if (cv.isString()) {
         SLANG_ASSERT(currDims.size() == 1);
 
-        auto& str = cv.str();
-        for (size_t i = 0; i < str.size(); i++) {
+        // The live length, as for a queue above (K-051).
+        const bool live = currDims.size() == loopDims.size();
+        ConstantValue current = cv;
+        for (size_t i = 0;; i++) {
+            if (live && i > 0) {
+                current = arrayRef.eval(context);
+                if (!current || !current.isString())
+                    return ER::Fail;
+            }
+            if (i >= current.str().size())
+                break;
             *local = SVInt(32, i, true);
 
             ER result = body.eval(context);
@@ -504,6 +525,35 @@ ER ForeachLoopStatement::evalRecursive(EvalContext& context, const ConstantValue
         }
     }
     else {
+        // A dynamic array at the outermost dimension: its live size at every test (K-051), as
+        // for a queue above -- `d = new[2]` in the body shortens the walk.
+        if (!dim.range && currDims.size() == loopDims.size()) {
+            ConstantValue current = cv;
+            for (size_t i = 0;; i++) {
+                if (i > 0) {
+                    current = arrayRef.eval(context);
+                    if (!current)
+                        return ER::Fail;
+                }
+                std::span<const ConstantValue> live;
+                if (current.isUnpacked())
+                    live = current.elements();
+                if (i >= live.size())
+                    break;
+                *local = SVInt(32, i, true);
+
+                ER result;
+                if (currDims.size() > 1)
+                    result = evalRecursive(context, live[i], currDims.subspan(1));
+                else
+                    result = body.eval(context);
+
+                if (result != ER::Success && result != ER::Continue)
+                    return result;
+            }
+            return ER::Success;
+        }
+
         std::span<const ConstantValue> elements;
         if (cv.isUnpacked())
             elements = cv.elements();
