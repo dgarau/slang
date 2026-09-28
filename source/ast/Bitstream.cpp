@@ -658,9 +658,10 @@ ConstantValue Bitstream::reOrder(ConstantValue&& value, uint64_t sliceSize, uint
             rightWidth -= trimWidth;
         }
 
-        // For unpack, extraBits is for the first block.
-        // For pack, extraBits is for the last block.
-        extraBits = unpackWidth % sliceSize;
+        // The kept bits are then cut as a pack cuts them, from the right, the left-most block
+        // short (SVMake READINGS-a1, K-434): every simulator measured (Questa, Xcelium, VCS,
+        // Riviera-PRO) reads 11.4.14.3's "reverse operation" as the same permutation, where this
+        // used to make the FIRST (right-most) block the short one.
     }
 
     std::vector<ConstantValue> result;
