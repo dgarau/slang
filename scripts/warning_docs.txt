@@ -711,6 +711,21 @@ function int func;
 endfunction
 ```
 
+-Wstream-round-up
+A constant function unpacks a stream into a dynamically sized item whose share of
+the bits is not a whole number of elements. As in a simulation (11.4.14.3; the
+commercial simulators assign and report), the item is rounded up to whole elements,
+the last one zero-filled on the right, and the items after it keep their own bits.
+```
+typedef byte q_t[$];
+function q_t f();
+    byte q[$], b;
+    {>>{q, b}} = 20'hABCDE; // q = '{ab, c0}, b = de
+    return q;
+endfunction
+localparam q_t p = f();
+```
+
 -Wdynarray-index
 A constant function tried to access a nonexistent element of a dynamic array.
 ```
