@@ -2435,6 +2435,78 @@ endfunction
     CHECK(q6[1].integer() == "8'shc3"_si);
 }
 
+TEST_CASE("SVMake K-458: a nested stream's dry run, a negative queue bound, a constant reversed range") {
+    // The dry run of a nested stream with a slice normalizes its `with` exactly as the real pass does (it asserted on a
+    // reversed range and threw on `$`); a negative position of a queue range is skipped with no range error, as the
+    // engine skips it; a CONSTANT reversed range on a queue binds with width 0, the empty range the unpack consumes.
+    ScriptSession session;
+    session.eval(R"(
+typedef byte bq_t[$];
+function bq_t n1();
+    byte q[$]; int a, b; byte x;
+    q = '{7}; a = 3; b = 1;
+    {>>{ {<<8{q with [a:b]}}, x }} = 16'h0102;
+    q.push_back(x);
+    return q;
+endfunction
+function bq_t n2();
+    byte q[$];
+    q = '{1, 2, 3};
+    {>>{ {<<8{q with [1:$]}} }} = 16'hAABB;
+    return q;
+endfunction
+function bq_t n3();
+    byte q[$]; int k;
+    k = -1;
+    {>>{q with [k:1]}} = 24'hA1B2C3;
+    return q;
+endfunction
+function bq_t n4();
+    byte q[$]; byte r[$];
+    q = '{7};
+    {>>{q with [3:1], r}} = 32'h01020304;
+    return r;
+endfunction
+)");
+
+    auto q1 = *session.eval("n1()").queue();
+    REQUIRE(q1.size() == 2);
+    CHECK(q1[0].integer() == 7);
+    CHECK(q1[1].integer() == 1);   // the nested stream is the empty range (0 bits), so x takes the left 8: 01
+
+    auto q2 = *session.eval("n2()").queue();
+    REQUIRE(q2.size() == 3);
+    CHECK(q2[1].integer() == "8'shbb"_si);   // `<<8` reverses AA BB, so q[1] gets BB and q[2] gets AA
+    CHECK(q2[2].integer() == "8'shaa"_si);
+
+    auto q3 = *session.eval("n3()").queue();
+    REQUIRE(q3.size() == 2);
+    CHECK(q3[0].integer() == "8'shb2"_si);
+    CHECK(q3[1].integer() == "8'shc3"_si);
+
+    auto q4 = *session.eval("n4()").queue();
+    REQUIRE(q4.size() == 4);
+    CHECK(q4[0].integer() == 1);
+    CHECK(q4[3].integer() == 4);
+
+    NO_SESSION_ERRORS;
+}
+
+TEST_CASE("SVMake K-458: a with range on a multi-dimensional array is refused (11.4.14.4)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    byte a[2][2];
+    int k;
+    initial {>>{a with [k]}} = 16'hAABB;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::BadStreamWithType);
+}
+
 TEST_CASE("Streaming 'with' range starting past the array extent") {
     // Regression: a source-side streaming 'with' range may begin beyond the current
     // queue/dynamic-array size; the nonexistent elements are streamed as the default
