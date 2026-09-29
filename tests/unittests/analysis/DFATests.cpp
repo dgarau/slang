@@ -1478,3 +1478,30 @@ endmodule
     auto diags = analyze(code, compilation, analysisManager);
     CHECK_DIAGS_EMPTY;
 }
+
+TEST_CASE("Data flow through pattern-matching if clauses (SVMake AGG-f)") {
+    // A `matches` clause's subject is the value matched, not a boolean condition: it must not be
+    // folded as one, and the clause does not lose the state assigned before the if.
+    auto& code = R"(
+typedef union tagged packed { logic [7:0] V; logic [7:0] W; } tu_t;
+module m;
+    tu_t p;
+    int z, y;
+    localparam tu_t P = tagged V (8'd1);
+    always_comb begin
+        z = 1;
+        if (p matches tagged V) ;
+    end
+    always_comb begin
+        if (P matches tagged W) y = 1;
+    end
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::InferredLatch);   // y: the constant P may not match; z is always assigned
+}
