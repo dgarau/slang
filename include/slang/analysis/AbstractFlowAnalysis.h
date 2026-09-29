@@ -320,11 +320,15 @@ protected:
     void visitStmt(const ConditionalStatement& stmt) {
         auto falseState = (DERIVED).unreachableState();
         for (auto& cond : stmt.conditions) {
+            if (cond.pattern) {
+                // `e matches p` (§12.6.2): e is the value matched, not a boolean, and a match is never
+                // constant here -- both outcomes are reachable with the state after the clause.
+                visitPatternClause(*cond.expr, *cond.pattern);
+                (DERIVED).joinState(falseState, (DERIVED).copyState(state));
+                continue;
+            }
+
             visitCondition(*cond.expr);
-
-            if (cond.pattern)
-                visit(*cond.pattern);
-
             (DERIVED).joinState(falseState, stateWhenFalse);
             setState(std::move(stateWhenTrue));
         }
@@ -880,6 +884,14 @@ protected:
         ConstantValue knownVal = SVInt::One;
         auto falseState = (DERIVED).unreachableState();
         for (auto& cond : expr.conditions) {
+            if (cond.pattern) {
+                // `e matches p` (§12.6.3): as in the conditional statement, never a constant condition.
+                visitPatternClause(*cond.expr, *cond.pattern);
+                knownVal = nullptr;
+                (DERIVED).joinState(falseState, (DERIVED).copyState(state));
+                continue;
+            }
+
             auto cv = visitCondition(*cond.expr);
             if (cv && knownVal) {
                 if (cv.isInteger() && (cv.hasUnknown() || knownVal.hasUnknown()))
@@ -1134,6 +1146,15 @@ private:
     ConstantValue visitCondition(const Expression& expr) {
         visitNoJoin(expr);
         return adjustConditionalState(expr);
+    }
+
+    void visitPatternClause(const Expression& expr, const Pattern& pattern) {
+        // The matched value is an ordinary expression: visited plainly (no constant folding of it as
+        // a condition), then the pattern (its constant expressions and identifiers).
+        if (isStateSplit)
+            unsplit();
+        visit(expr);
+        visit(pattern);
     }
 
 #undef DERIVED
