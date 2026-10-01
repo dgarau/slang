@@ -1260,7 +1260,8 @@ endfunction
     CHECK(sformatf("%p", "va") == "'{10:'{sw:OFF, s:\"switch10\"}, 20:'{sw:ON, s:\"switch20\"}}");
     CHECK(sformatf("%p", "\"Hello World\"") == "\"Hello World\"");
     CHECK(sformatf("%0p", "va") == "'{10:'{OFF,\"switch10\"},20:'{ON,\"switch20\"}}");
-    CHECK(sformatf("%p", "up") == "'{a:4'b1111}");
+    // SVMake IO-p (K-498): a packed union is an integral leaf, as the run time prints it -- not its first member.
+    CHECK(sformatf("%p", "up") == "15");
     CHECK(sformatf("%p", "da") == "'{3, 0, 0, 1}");
     CHECK(sformatf("%0p", "fa") == "'{1,1,4,1,1,1,1,1}");
     CHECK(sformatf("%0p", "qa") == "'{1,2,3}");
@@ -3208,6 +3209,21 @@ TEST_CASE("Eval scalar bit select") {
     CHECK(diags[0].code == diag::CannotIndexScalar);
     CHECK(diags[1].code == diag::CannotIndexScalar);
     CHECK(diags[2].code == diag::CannotIndexScalar);
+}
+
+TEST_CASE("SVMake IO-p: a %p integral leaf reads back -- decimal when it fits an int, else sized") {
+    ScriptSession session;
+    session.eval(R"(
+typedef struct { int a; logic [7:0] b; logic [3:0] c; longint d; bit [63:0] e; logic signed [99:0] f; } s_t;
+localparam s_t S = '{-3, 8'hff, 4'bx01z, -64'sd5000000000000, 64'hffffffffffffffff, -100'sd7};
+localparam int unsigned U = 32'hffffffff;
+typedef enum logic [1:0] {E0, E1} e_t;
+localparam e_t EM = e_t'(3);
+)");
+    CHECK(session.eval("$sformatf(\"%p\", S)").str() ==
+          "'{a:-3, b:255, c:4'bx01z, d:-64'sd5000000000000, e:64'd18446744073709551615, f:-7}");
+    CHECK(session.eval("$sformatf(\"%p\", U)").str() == "32'd4294967295");
+    CHECK(session.eval("$sformatf(\"%p\", EM)").str() == "3");
 }
 
 TEST_CASE("Unpack slices as a pack; foreach reads the live size (SVMake READINGS-a1)") {

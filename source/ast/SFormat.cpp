@@ -367,6 +367,29 @@ void formatStrength(std::string& result, const SVInt& value) {
     }
 }
 
+void formatPatternLeaf(std::string& result, const SVInt& value) {
+    if (value.hasUnknown()) {
+        result += value.toString(LiteralBase::Binary, /* includeBase */ true);
+        return;
+    }
+    const bool fits = value.isSigned() ? value.getMinRepresentedBits() <= 32
+                                       : value.getActiveBits() <= 31;
+    if (fits) {
+        result += value.toString(LiteralBase::Decimal, /* includeBase */ false);
+        return;
+    }
+    const std::string width = std::to_string(value.getBitWidth());
+    if (value.isSigned() && value.isNegative()) {
+        SVInt magnitude = -value;
+        magnitude.setSigned(false);
+        result += "-" + width + "'sd" + magnitude.toString(LiteralBase::Decimal, false);
+        return;
+    }
+    SVInt magnitude = value;
+    magnitude.setSigned(false);
+    result += width + (value.isSigned() ? "'sd" : "'d") + magnitude.toString(LiteralBase::Decimal, false);
+}
+
 struct TypeVisitor {
     bool abbreviated;
     bool isStringLiteral;
@@ -381,7 +404,19 @@ struct TypeVisitor {
                 return;
             }
         }
-        buffer.append(arg.toString());
+        appendValue(arg);   // SVMake IO-p: a miss prints as its base type would, under the leaf rule
+    }
+
+    // SVMake IO-p -- an integral leaf through formatPatternLeaf; anything else as before.
+    void appendValue(const ConstantValue& arg) {
+        if (arg.isInteger()) {
+            std::string text;
+            formatPatternLeaf(text, arg.integer());
+            buffer.append(text);
+        }
+        else {
+            buffer.append(arg.toString());
+        }
     }
 
     void visit(const PackedStructType& type, const ConstantValue& arg) {
@@ -443,11 +478,10 @@ struct TypeVisitor {
         }
     }
 
-    void visit(const PackedUnionType& type, const ConstantValue& arg) {
-        // LRM says the value is printed with the type of the first member.
-        auto fields = type.membersOfType<FieldSymbol>();
-        if (!fields.empty())
-            fields.front().getType().visit(*this, arg);
+    void visit(const PackedUnionType&, const ConstantValue& arg) {
+        // SVMake IO-p (K-498): a packed union is a singular value, printed as an integral leaf -- the run time prints
+        // it so. Reading it through its FIRST member's type misread a tagged union's tag bits as that member's bits.
+        appendValue(arg);
     }
 
     void visit(const UnpackedUnionType& type, const ConstantValue& arg) {
@@ -515,7 +549,7 @@ struct TypeVisitor {
         if (isStringLiteral)
             buffer.append(arg.convertToStr().toString());
         else
-            buffer.append(arg.toString());
+            appendValue(arg);
     }
 
     template<typename T>
