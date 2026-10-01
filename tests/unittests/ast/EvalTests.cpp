@@ -3224,6 +3224,17 @@ localparam e_t EM = e_t'(3);
           "'{a:-3, b:255, c:4'bx01z, d:-64'sd5000000000000, e:64'd18446744073709551615, f:-7}");
     CHECK(session.eval("$sformatf(\"%p\", U)").str() == "32'd4294967295");
     CHECK(session.eval("$sformatf(\"%p\", EM)").str() == "3");
+    session.eval(R"(
+typedef enum logic signed [2:0] { NEG = -3'sd2, ZERO = 3'sd0 } se_t;
+typedef struct packed { logic signed [3:0] s; se_t e; logic [3:0] u; } ps_t;
+localparam ps_t PS = '{-4'sd2, se_t'(3'sb101), 4'd15};
+localparam int IMIN = 32'h80000000;
+)");
+    // A packed struct's field is signed as declared, and so is an enum field's miss (the run time re-signs each field).
+    CHECK(session.eval("$sformatf(\"%p\", PS)").str() == "'{s:-2, e:-3, u:15}");
+    CHECK(session.eval("$sformatf(\"%0p\", PS)").str() == "'{-2,-3,15}");
+    // -2^31 is printed sized: `-2147483648` reads back through an overflowing 2147483648.
+    CHECK(session.eval("$sformatf(\"%p\", IMIN)").str() == "-32'sd2147483648");
 }
 
 TEST_CASE("Unpack slices as a pack; foreach reads the live size (SVMake READINGS-a1)") {
