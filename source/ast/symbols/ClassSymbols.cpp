@@ -1162,6 +1162,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
             auto [it, inserted] = specMap.emplace(key, classType);
             if (!inserted)
                 return it->second;
+            specOrder.push_back(classType);
         }
     }
 
@@ -1194,8 +1195,8 @@ void GenericClassDefSymbol::checkForwardDecls() const {
 
 SmallVector<const Type*> GenericClassDefSymbol::specializations() const {
     SmallVector<const Type*> results;
-    results.reserve(specMap.size());
-    for (auto& [_, spec] : specMap)
+    results.reserve(specOrder.size());
+    for (auto spec : specOrder)
         results.push_back(spec);
     return results;
 }

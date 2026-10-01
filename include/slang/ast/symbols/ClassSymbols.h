@@ -270,9 +270,11 @@ public:
     /// Gets the number of specializations that have been made for this generic class.
     size_t numSpecializations() const { return specMap.size(); }
 
-    /// Gets a snapshot of the specializations created so far for the generic class.
-    /// A copy is returned because visiting or otherwise elaborating a specialization
-    /// can create new specializations, which would invalidate a live iterator.
+    /// Gets a snapshot of the specializations created so far for the generic class, in the
+    /// order they were created -- deterministic, unlike the hash map's own order, which follows
+    /// pointer values and so changes from run to run. A copy is returned because visiting or
+    /// otherwise elaborating a specialization can create new specializations, which would
+    /// invalidate a live iterator.
     SmallVector<const Type*> specializations() const;
 
     void addForwardDecl(const ForwardingTypedefSymbol& decl) const;
@@ -309,6 +311,7 @@ private:
     using SpecMap = flat_hash_map<detail::ClassSpecializationKey, const Type*,
                                   detail::ClassSpecializationHasher>;
     mutable SpecMap specMap;
+    mutable SmallVector<const Type*, 4> specOrder;
     mutable SpecMap uninstantiatedSpecMap;
     mutable std::optional<const Type*> defaultSpecialization;
     mutable const ForwardingTypedefSymbol* firstForward = nullptr;
