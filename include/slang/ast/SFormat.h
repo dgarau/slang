@@ -54,6 +54,12 @@ SLANG_EXPORT bool parse(
 SLANG_EXPORT void formatInt(std::string& result, const SVInt& value, LiteralBase base,
                             const FormatOptions& options);
 
+/// SVMake IO-p -- one INTEGRAL leaf of a %p assignment pattern (21.2.1.6: "as they would unformatted"), appended to
+/// @a result so that the pattern reads back as the same value: plain decimal when the value is fully known and fits a
+/// 32-bit int (an unsized decimal literal), otherwise a sized literal -- decimal (`64'd...`, `-64'sd...`) for a known
+/// value, binary (`4'bx01z`) when a bit is x or z.
+SLANG_EXPORT void formatPatternLeaf(std::string& result, const SVInt& value);
+
 /// Format the given @a arg into a string and append it to @a result according
 /// to the provided @a options
 SLANG_EXPORT void formatArg(std::string& result, const ConstantValue& arg, const Type& type,

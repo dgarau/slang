@@ -4332,8 +4332,8 @@ function RT f2;
     return '{0:8, 1:9, default:'{-1{foo}}};
 endfunction
 
-$static_assert($sformatf("%p", f1()) == "'{8'd8, 8'd9}");
-$static_assert($sformatf("%p", f2()) == "'{8'd8, 8'd9}");
+$static_assert($sformatf("%p", f1()) == "'{8, 9}");
+$static_assert($sformatf("%p", f2()) == "'{8, 9}");
 )");
 
     Compilation compilation;
