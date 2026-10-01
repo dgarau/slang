@@ -1123,6 +1123,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
             auto [it, inserted] = specMap.emplace(key, classType);
             if (!inserted)
                 return it->second;
+            specOrder.push_back(classType);
         }
     }
 
