@@ -1174,6 +1174,15 @@ ConstantValue SimpleAssignmentPatternExpression::applyConversions(EvalContext& c
     }
 }
 
+// SVMake K-518 -- an assignment pattern with no type prefix, through any parentheses.
+static bool isUntypedPatternSyntax(const ExpressionSyntax& syntax) {
+    const ExpressionSyntax* expr = &syntax;
+    while (expr->kind == SyntaxKind::ParenthesizedExpression)
+        expr = expr->as<ParenthesizedExpressionSyntax>().expression;
+    return expr->kind == SyntaxKind::AssignmentPatternExpression &&
+           !expr->as<AssignmentPatternExpressionSyntax>().type;
+}
+
 static const Expression* matchElementValue(
     const ASTContext& context, const Type& elementType, const FieldSymbol* targetField,
     SourceRange sourceRange,
@@ -1213,6 +1222,16 @@ static const Expression* matchElementValue(
     if (defaultSetter) {
         if (elementType.isMatching(*defaultSetter->type))
             return defaultSetter;
+
+        // SVMake K-518: a default whose value is an UNTYPED assignment pattern ('{default: '{...}}) has no
+        // self-determined type of its own (bindDefaultSetter binds it against the error type), so it applies
+        // at the first unpacked aggregate level it can be an assignment pattern for -- a subarray or an
+        // unpacked struct -- rather than descending to every packed leaf, where '{default: 2} became a 32-bit
+        // pattern of 0s and '{2, 3, 4} an error. Questa, Xcelium, VCS and Riviera-PRO all bind it this way.
+        if (isUntypedPatternSyntax(*defaultSyntax) &&
+            (elementType.isUnpackedArray() || elementType.isUnpackedStruct())) {
+            return &Expression::bindRValue(elementType, *defaultSyntax, {}, context);
+        }
 
         if (elementType.isSimpleBitVector())
             return &Expression::bindRValue(elementType, *defaultSyntax, {}, context);
