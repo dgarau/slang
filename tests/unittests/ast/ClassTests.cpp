@@ -4203,3 +4203,55 @@ endmodule
     CHECK(system[5]);
     CHECK(system[6]);
 }
+
+TEST_CASE("generic class specializations iterate in creation order (SVMake K-483)") {
+    // The specialization map is hashed on keys holding pointers, so walking it directly gave a different order from
+    // run to run -- and every ASTVisitor walk of a GenericClassDef visits its specializations in that order. A design
+    // tool that numbers what it visits needs the order the specializations were made in.
+    auto tree = SyntaxTree::fromText(R"(
+package p;
+class C;
+endclass
+class D;
+endclass
+class Fifo #(type T = int, int N = 0);
+    T v;
+endclass
+endpackage
+module top;
+    p::Fifo #(p::C, 3) a;
+    p::Fifo #(p::D, 1) b;
+    p::Fifo #(int, 7) c;
+    p::Fifo #(p::C, 2) d;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto* package = compilation.getPackage("p");
+    REQUIRE(package != nullptr);
+    auto* fifoSym = package->find("Fifo");
+    REQUIRE(fifoSym != nullptr);
+    REQUIRE(fifoSym->kind == SymbolKind::GenericClassDef);
+    auto& fifo = fifoSym->as<GenericClassDefSymbol>();
+    std::vector<std::string> order;
+    for (auto& spec : fifo.specializations()) {
+        REQUIRE(spec.getCanonicalType().kind == SymbolKind::ClassType);
+        auto& cls = spec.getCanonicalType().as<ClassType>();
+        std::string text;
+        for (auto& member : cls.members()) {
+            if (member.kind == SymbolKind::Parameter)
+                text += member.as<ParameterSymbol>().getValue().toString();
+            else if (member.kind == SymbolKind::TypeParameter)
+                text += member.as<TypeParameterSymbol>().targetType.getType().toString() + ",";
+        }
+        order.push_back(text);
+    }
+    REQUIRE(order.size() == 4);
+    CHECK(order[0] == "C,3");
+    CHECK(order[1] == "D,1");
+    CHECK(order[2] == "int,7");
+    CHECK(order[3] == "C,2");
+}
