@@ -4225,6 +4225,33 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("SVMake K-518: an untyped pattern as a default applies to the subarray") {
+    // Questa, Xcelium, VCS and Riviera-PRO all fill each row: '{default: '{default: 2}} into int m[2][3] is all
+    // 2s, and '{default: '{2, 3, 4}} is '{2, 3, 4} in each row. slang bound the inner pattern against the int
+    // leaf: all 0s, and "requires 32 elements" for the positional form.
+    auto tree = SyntaxTree::fromText(R"(
+typedef int M[2][3];
+typedef struct { int a; int b; } S;
+typedef S SA[2];
+function automatic M f1; M m = '{default: '{default: 2}}; return m; endfunction
+function automatic M f2; M m = '{default: '{2, 3, 4}}; return m; endfunction
+function automatic M f3; M m = '{0: '{9, 9, 9}, default: '{default: 5}}; return m; endfunction
+function automatic SA f4; SA s = '{default: '{7, 8}}; return s; endfunction
+$static_assert(f1()[1][2] == 2 && f1()[0][0] == 2);
+$static_assert(f2()[0][0] == 2 && f2()[1][1] == 3 && f2()[1][2] == 4);
+$static_assert(f3()[0][1] == 9 && f3()[1][0] == 5);
+$static_assert(f4()[1].a == 7 && f4()[1].b == 8);
+module m;
+    logic [7:0] r [2][3];
+    initial r = '{default: '{default: 8'h5a}};
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("Assignment pattern unused default is still error checked") {
     auto tree = SyntaxTree::fromText(R"(
 typedef logic [7:0] RT[2];
