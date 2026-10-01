@@ -372,8 +372,12 @@ void formatPatternLeaf(std::string& result, const SVInt& value) {
         result += value.toString(LiteralBase::Binary, /* includeBase */ true);
         return;
     }
-    const bool fits = value.isSigned() ? value.getMinRepresentedBits() <= 32
-                                       : value.getActiveBits() <= 31;
+    // -2^31 fits an int but `-2147483648` reads back through an overflowing 2147483648, so it takes the sized form.
+    const bool fits = value.isSigned()
+                          ? value.getMinRepresentedBits() < 32 ||
+                                (value.getMinRepresentedBits() == 32 && !(value.isNegative() &&
+                                                                          (-value) == value))
+                          : value.getActiveBits() <= 31;
     if (fits) {
         result += value.toString(LiteralBase::Decimal, /* includeBase */ false);
         return;
@@ -429,6 +433,7 @@ struct TypeVisitor {
                 auto& fieldType = field.getType();
                 auto fieldWidth = int32_t(fieldType.getBitWidth());
                 auto elem = value.slice(currOffset - 1, currOffset - fieldWidth);
+                elem.setSigned(fieldType.isSigned());   // SVMake IO-p: a field is signed as declared, as the run time reads it
                 currOffset -= fieldWidth;
 
                 if (!abbreviated) {
