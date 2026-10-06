@@ -42,6 +42,10 @@ public:
         /// argument when the call is made, and non-static members of the object referenced
         /// in the argument list and inline constraints are accessed through it.
         const VariableSymbol* thisVar = nullptr;
+
+        /// True if the call has a `with (...)` name list, even an empty one.
+        /// An empty list restricts every name to the caller's scope (IEEE 1800-2023 18.7).
+        bool isRestricted = false;
     };
 
     /// Additional context that applies to system subroutine calls.

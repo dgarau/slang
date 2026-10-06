@@ -612,6 +612,7 @@ Expression& CallExpression::createSystemCall(
                     }
 
                     randInfo.constraintRestrictions = names.copy(argContext.getCompilation());
+                    randInfo.isRestricted = true;
                 }
 
                 callInfo.extraInfo = randInfo;
@@ -902,6 +903,7 @@ bool CallExpression::isEquivalentImpl(const CallExpression& rhs) const {
             if (bool(lrc.inlineConstraints) != bool(rrc.inlineConstraints) ||
                 (lrc.inlineConstraints &&
                  !lrc.inlineConstraints->isEquivalentTo(*rrc.inlineConstraints)) ||
+                lrc.isRestricted != rrc.isRestricted ||
                 !std::ranges::equal(lrc.constraintRestrictions, rrc.constraintRestrictions)) {
                 return false;
             }
@@ -1032,6 +1034,9 @@ void CallExpression::serializeTo(ASTSerializer& serializer) const {
                 serializer.write("thisVar", *randInfo.thisVar);
             if (randInfo.inlineConstraints)
                 serializer.write("inlineConstraints", *randInfo.inlineConstraints);
+
+            if (randInfo.isRestricted)
+                serializer.write("isRestricted", true);
 
             if (!randInfo.constraintRestrictions.empty()) {
                 serializer.startArray("constraintRestrictions");

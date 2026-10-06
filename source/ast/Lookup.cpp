@@ -1825,8 +1825,9 @@ bool Lookup::withinClassRandomize(const ASTContext& context, const NameSyntax& s
             if (name.text.empty())
                 return false;
 
-            // If the lookup is restricted we have to verify that the
-            // first element is in the list of allowed names.
+            // If a restriction list was written (even an empty one, 18.7), we have to
+            // verify that the first element is in the list. Otherwise the lookup is
+            // unrestricted.
             if (details.isRestricted) {
                 if (std::ranges::find(details.nameRestrictions, name.text) ==
                     details.nameRestrictions.end()) {
