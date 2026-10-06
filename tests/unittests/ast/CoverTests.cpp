@@ -1115,3 +1115,79 @@ endclass
     CHECK(diags[1].code == diag::InvalidThisHandle);
     CHECK(diags[2].code == diag::InvalidThisHandle);
 }
+
+TEST_CASE("this and super in covergroups: the edges of the COVER-e1 patch") {
+    auto tree = SyntaxTree::fromText(R"(
+interface i;
+    bit [3:0] a;
+    covergroup cg;
+        cp: coverpoint this.a { bins one = {1}; }
+    endgroup
+endinterface
+program p;
+    bit [3:0] a;
+    covergroup cg;
+        cp: coverpoint this.a { bins one = {1}; }
+    endgroup
+endprogram
+checker k;
+    bit [3:0] a;
+    covergroup cg;
+        cp: coverpoint this.a { bins one = {1}; }
+    endgroup
+endchecker
+class S;
+    bit [3:0] a;
+    static function bit f();
+        return this.a == 0;
+    endfunction
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    for (auto& d : diags)
+        CHECK(d.code == diag::InvalidThisHandle);
+    CHECK(diags.size() == 4);
+}
+
+TEST_CASE("this.local and super from a cross body, and a nested class's this (SVMake COVER-e1)") {
+    auto tree = SyntaxTree::fromText(R"(
+class B;
+    bit bx;
+endclass
+class D extends B;
+    bit [3:0] a, b;
+    local bit lp;
+    covergroup cg;
+        ca: coverpoint a { bins one = {1}; }
+        cb: coverpoint b { bins one = {1}; }
+        x: cross ca, cb {
+            bins t = binsof(ca) intersect {1} iff (this.lp);
+            bins u = binsof(cb) intersect {1} iff (super.bx);
+        }
+    endgroup
+    function new; cg = new; endfunction
+endclass
+class Outer;
+    bit o;
+    class Inner;
+        bit [3:0] a;
+        covergroup cg;
+            cp: coverpoint a iff (this.o) { bins one = {1}; }
+        endgroup
+    endclass
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UnknownMember);
+}
