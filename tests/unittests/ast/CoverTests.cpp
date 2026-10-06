@@ -1030,3 +1030,88 @@ endmodule
     CHECK(diags[0].code == diag::CoverCrossItems);
     CHECK(diags[1].code == diag::InvalidBinsTarget);
 }
+
+TEST_CASE("this in a covergroup embedded in a class (SVMake COVER-e1)") {
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    bit [3:0] a, b;
+    bit en, clk;
+    covergroup cg @(posedge this.clk);
+        cp_a: coverpoint this.a { bins lo = {[0:7]}; bins hi = {[8:15]} iff (this.en); }
+        cp_b: coverpoint b iff (this.en) { bins x = {1}; }
+        cross_ab: cross cp_a, cp_b iff (this.en);
+    endgroup
+    covergroup cg2 with function sample(bit [3:0] a);
+        cp: coverpoint this.a { bins one = {1}; }
+        cp2: coverpoint a { bins two = {2}; }
+        cp3: coverpoint a iff (this.a == a) { bins three = {3}; }
+    endgroup
+    function new; cg = new; cg2 = new; endfunction
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("this and class members in a cross body (SVMake COVER-e1)") {
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    bit [3:0] a, b;
+    bit en;
+    local bit lp;
+    protected bit pp;
+    covergroup cg;
+        ca: coverpoint a { bins one = {1}; }
+        cb: coverpoint b { bins one = {1}; }
+        x: cross ca, cb {
+            bins t = binsof(ca) intersect {1} iff (this.en);
+            bins u = binsof(cb) intersect {1} iff (en);
+            bins v = binsof(ca) intersect {1} iff (lp);
+            bins w = binsof(cb) intersect {1} iff (pp);
+        }
+    endgroup
+    function new; cg = new; endfunction
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("this stays invalid outside a class-embedded covergroup (SVMake COVER-e1)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit [3:0] a;
+    covergroup cg;
+        cp: coverpoint this.a { bins one = {1}; }
+    endgroup
+endmodule
+package p;
+    bit [3:0] a;
+    covergroup cg;
+        cp: coverpoint this.a { bins one = {1}; }
+    endgroup
+endpackage
+class C;
+    bit [3:0] a;
+    covergroup cg;
+        option.weight = int'(this.a);
+        type_option.weight = int'(this.a);
+        cp: coverpoint a { bins one = {1}; }
+    endgroup
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    INFO(report(diags));
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::InvalidThisHandle);
+    CHECK(diags[1].code == diag::InvalidThisHandle);
+    CHECK(diags[2].code == diag::InvalidThisHandle);
+}

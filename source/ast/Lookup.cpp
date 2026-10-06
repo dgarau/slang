@@ -1058,6 +1058,33 @@ const Symbol* findThisHandle(const Scope& scope, bitmask<LookupFlags> flags, Sou
                  !flags.has(LookupFlags::StaticInitializer)) {
             return parent->as<ClassType>().thisVar;
         }
+        else if (!flags.has(LookupFlags::StaticInitializer)) {
+            // 8.11: `this` is legal within a covergroup embedded in a class (a coverpoint or cross
+            // expression, a bin or cross iff, a coverage event, an option initializer) and names
+            // the enclosing object.
+            auto inCovergroup = [](SymbolKind kind) {
+                switch (kind) {
+                    case SymbolKind::CovergroupBody:
+                    case SymbolKind::CovergroupType:
+                    case SymbolKind::Coverpoint:
+                    case SymbolKind::CoverCross:
+                    case SymbolKind::CoverCrossBody:
+                        return true;
+                    default:
+                        return false;
+                }
+            };
+            if (inCovergroup(parent->kind)) {
+                while (inCovergroup(parent->kind)) {
+                    auto parentScope = parent->getParentScope();
+                    if (!parentScope)
+                        break;
+                    parent = &parentScope->asSymbol();
+                }
+                if (parent->kind == SymbolKind::ClassType)
+                    return parent->as<ClassType>().thisVar;
+            }
+        }
     }
 
     result.addDiag(scope, diag::InvalidThisHandle, range);
@@ -1094,6 +1121,7 @@ bool withinCovergroup(const Symbol& symbol, const Scope& initialScope) {
             case SymbolKind::CovergroupBody:
             case SymbolKind::Coverpoint:
             case SymbolKind::CoverCross:
+            case SymbolKind::CoverCrossBody:
                 if (symbol.getParentScope() == nextScope)
                     return true;
 
@@ -1552,6 +1580,7 @@ std::pair<const ClassType*, bool> Lookup::getContainingClass(const Scope& scope)
             case SymbolKind::CovergroupType:
             case SymbolKind::Coverpoint:
             case SymbolKind::CoverCross:
+            case SymbolKind::CoverCrossBody:
                 return true;
             default:
                 return false;
