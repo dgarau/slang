@@ -199,9 +199,14 @@ void formatInt(std::string& result, const SVInt& value, LiteralBase base,
                 width = uint32_t(std::ceil(bw / 4.0));
                 break;
             case LiteralBase::Decimal:
-                width = uint32_t(std::ceil(bw / log2_10));
-                if (value.isSigned())
-                    width++;
+                if (value.isSigned()) {
+                    // SVMake IO-D1c: IEEE 1800-2023 21.2.1.2 sizes the field by "the largest possible
+                    // value": the magnitude of a signed n-bit value is at most 2^(n-1), plus a sign column.
+                    width = uint32_t(std::floor((bw - 1) / log2_10)) + 2;
+                }
+                else {
+                    width = uint32_t(std::ceil(bw / log2_10));
+                }
                 break;
         }
     }
