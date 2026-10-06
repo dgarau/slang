@@ -3880,6 +3880,43 @@ endclass
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("Randomize with () restricts every name to the caller's scope (18.7)") {
+    // An empty `with ()` list is a list: no name is looked up in the class
+    // being randomized. SVMake RAND-j0 / D-075.
+    auto tree = SyntaxTree::fromText(R"(
+class A;
+    rand int x;
+    rand int y;
+endclass
+
+class B;
+    int x;
+    function void f();
+        A a;
+        void'(a.randomize() with () { x < 5; });   // B::x, legal
+    endfunction
+
+    function void g();
+        A a;
+        void'(a.randomize() with () { y < 5; });   // A::y is not visible
+    endfunction
+
+    function void h();
+        A a;
+        void'(a.randomize() with (y) { y < 5; });  // unchanged: A::y
+        void'(a.randomize() with { y < 5; });      // unchanged: unrestricted
+    endfunction
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+}
+
 TEST_CASE("Missing extern pre_randomize doesn't crash") {
     auto tree = SyntaxTree::fromText(R"(
 class C;

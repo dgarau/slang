@@ -293,6 +293,10 @@ public:
         /// tried in class-scope.
         std::span<const std::string_view> nameRestrictions;
 
+        /// True if a `with (...)` list was written, even an empty one. An empty
+        /// restricted list sends every name to the caller's scope (18.7).
+        bool isRestricted = false;
+
         /// A set of variables for a scope randomize call that should be
         /// treated as a rand variable.
         flat_hash_set<const Symbol*> scopeRandVars;

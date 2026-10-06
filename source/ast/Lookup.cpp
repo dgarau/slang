@@ -1751,10 +1751,10 @@ bool Lookup::withinClassRandomize(const ASTContext& context, const NameSyntax& s
             if (name.text.empty())
                 return false;
 
-            // If the nameRestrictions list is not empty, we have to verify that the
-            // first element is in the list. Otherwise, an empty list indicates that
-            // the lookup is unrestricted.
-            if (!details.nameRestrictions.empty()) {
+            // If a restriction list was written (even an empty one, 18.7), we have to
+            // verify that the first element is in the list. Otherwise the lookup is
+            // unrestricted.
+            if (details.isRestricted) {
                 if (std::ranges::find(details.nameRestrictions, name.text) ==
                     details.nameRestrictions.end()) {
                     return false;

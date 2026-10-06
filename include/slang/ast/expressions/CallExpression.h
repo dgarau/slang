@@ -34,6 +34,10 @@ public:
 
         /// Extra constraint restrictions that apply, if any.
         std::span<const std::string_view> constraintRestrictions;
+
+        /// True if the call has a `with (...)` name list, even an empty one.
+        /// An empty list restricts every name to the caller's scope (IEEE 1800-2023 18.7).
+        bool isRestricted = false;
     };
 
     /// Additional context that applies to system subroutine calls.
