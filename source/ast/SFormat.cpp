@@ -372,6 +372,12 @@ void formatStrength(std::string& result, const SVInt& value) {
     }
 }
 
+// SVMake IO-D1f-a -- the REAL leaf of a %p pattern is the unformatted real (21.2.1.6: "as they would unformatted"), which the
+// tools print as %.16g (1e8 is 100000000, 1234567.0 is 1234567); the run-time renderer asks the same function.
+void formatPatternReal(std::string& result, double value) {
+    formatFloat(result, value, 'g', FormatOptions{.precision = 16});
+}
+
 void formatPatternLeaf(std::string& result, const SVInt& value) {
     if (value.hasUnknown()) {
         result += value.toString(LiteralBase::Binary, /* includeBase */ true);
@@ -421,6 +427,11 @@ struct TypeVisitor {
         if (arg.isInteger()) {
             std::string text;
             formatPatternLeaf(text, arg.integer());
+            buffer.append(text);
+        }
+        else if (arg.isReal()) {
+            std::string text;
+            formatPatternReal(text, arg.real());
             buffer.append(text);
         }
         else {

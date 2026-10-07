@@ -1239,6 +1239,7 @@ localparam pair_t va[int] = '{10:'{OFF, "switch10"}, 20:'{ON, "switch20"}};
 localparam union packed { struct packed { logic [3:0] a; } a; logic [3:0] b; } up = 15;
 
 localparam int da[] = '{3, 0, 0, 1};
+localparam real rl[] = '{1e8, 1234567.0, 0.1, 1.0/3.0};
 localparam int fa[8] = '{2:4, default:1};
 localparam int qa[$] = '{1, 2, 3};
 localparam int aa[*] = '{3:1, 4:2, 5:3};
@@ -1258,6 +1259,7 @@ endfunction
 )");
 
     CHECK(sformatf("%p", "va") == "'{10:'{sw:OFF, s:\"switch10\"}, 20:'{sw:ON, s:\"switch20\"}}");
+    CHECK(sformatf("%p", "rl") == "'{100000000, 1234567, 0.1, 0.3333333333333333}");
     CHECK(sformatf("%p", "\"Hello World\"") == "\"Hello World\"");
     CHECK(sformatf("%0p", "va") == "'{10:'{OFF,\"switch10\"},20:'{ON,\"switch20\"}}");
     // SVMake IO-p (K-498): a packed union is an integral leaf, as the run time prints it -- not its first member.

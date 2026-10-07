@@ -60,6 +60,9 @@ SLANG_EXPORT void formatInt(std::string& result, const SVInt& value, LiteralBase
 /// value, binary (`4'bx01z`) when a bit is x or z.
 SLANG_EXPORT void formatPatternLeaf(std::string& result, const SVInt& value);
 
+/// SVMake IO-D1f-a -- one REAL leaf of a %p pattern (21.2.1.6): the unformatted real, `%.16g`.
+SLANG_EXPORT void formatPatternReal(std::string& result, double value);
+
 /// Format the given @a arg into a string and append it to @a result according
 /// to the provided @a options
 SLANG_EXPORT void formatArg(std::string& result, const ConstantValue& arg, const Type& type,
