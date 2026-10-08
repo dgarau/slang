@@ -3347,3 +3347,32 @@ endfunction
 
     NO_SESSION_ERRORS;
 }
+
+TEST_CASE("sformatf sizes a signed decimal by the digits of 2^n - 1 plus a sign column (SVMake IO-D1f-d)") {
+    // David Garau, 2026-10-08 (call 3): the automatic field of a signed decimal is digits(2^bw - 1) + 1 -- 3 columns for 4 bits, 21 for 64.
+    ScriptSession session;
+    auto widthOf = [&](int n) {
+        auto text = session.eval("$sformatf(\"%d\", " + std::to_string(n) + "'sd1)").str();
+        return text.size();
+    };
+    CHECK(widthOf(1) == 2);
+    CHECK(widthOf(2) == 2);
+    CHECK(widthOf(3) == 2);
+    CHECK(widthOf(4) == 3);
+    CHECK(widthOf(7) == 4);
+    CHECK(widthOf(8) == 4);
+    CHECK(widthOf(10) == 5);
+    CHECK(widthOf(14) == 6);
+    CHECK(widthOf(16) == 6);
+    CHECK(widthOf(17) == 7);
+    CHECK(widthOf(32) == 11);
+    CHECK(widthOf(33) == 11);
+    CHECK(widthOf(64) == 21);
+    CHECK(widthOf(65) == 21);
+
+    // an UNSIGNED value keeps the digits of 2^n - 1
+    CHECK(session.eval("$sformatf(\"%d\", 4'd1)"s).str() == " 1");
+    CHECK(session.eval("$sformatf(\"%d\", 64'd1)"s).str().size() == 20);
+    CHECK(session.eval("$sformatf(\"%d\", -4'sd8)"s).str() == " -8");
+    CHECK(session.eval("$sformatf(\"%d\", 4'sd5)"s).str() == "  5");
+}
