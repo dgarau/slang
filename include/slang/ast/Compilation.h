@@ -717,13 +717,12 @@ public:
 
     /// SVMake IO-D1f-a3: every such directive value (one per declaration that had one), in no
     /// particular order -- for a client that sizes the finest precision of a design.
-    std::vector<TimeScale> getAllMemberDirectiveTimeScales() const {
-        std::vector<TimeScale> result;
-        result.reserve(memberTimeScales.size());
-        for (auto& [node, scale] : memberTimeScales)
-            result.push_back(scale);
-        return result;
-    }
+    ///
+    /// Only the declarations made DIRECTLY at a compilation unit count (a class or a function/task whose
+    /// syntax parent is the unit); members of modules, interfaces, packages, programs and classes have
+    /// their own scope's scale, and an out-of-block `function void C::f()` is the class's. A client
+    /// sizing a design's finest precision must not be moved by an unrelated declaration.
+    std::vector<TimeScale> getAllMemberDirectiveTimeScales() const;
 
     /// Gets the next system ID to use for identifying enum types.
     int getNextEnumSystemId() { return nextEnumSystemId++; }

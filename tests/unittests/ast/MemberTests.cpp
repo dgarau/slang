@@ -2556,3 +2556,41 @@ endclass
     CHECK(compilation.getCompilationUnits()[0]->find<ClassType>("A").getTimeScale() == ts("10ns/10ps"));
     CHECK(compilation.getAllMemberDirectiveTimeScales().size() == 1);
 }
+
+TEST_CASE("Only compilation-unit declarations count as unit members; a unit's declared half wins per half (SVMake IO-D1f-a3)") {
+    auto tree = SyntaxTree::fromText(R"(
+timeprecision 1ps;
+`timescale 1fs / 1fs
+module unrelated;
+    function void f(); endfunction
+endmodule
+package pk;
+    class PC; function void g(); endfunction endclass
+endpackage
+`timescale 1us / 1ns
+class A;
+    extern function void h();
+    function void k(); endfunction
+endclass
+`timescale 1ms / 1ms
+function void A::h(); endfunction
+function void uf(); endfunction
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    auto& unit = *compilation.getCompilationUnits()[0];
+
+    // the module's function, the package's class and the out-of-block definition are not unit members: A (1us/1ns) and uf (1ms/1ms) are
+    auto all = compilation.getAllMemberDirectiveTimeScales();
+    CHECK(all.size() == 2);
+    CHECK(std::count(all.begin(), all.end(), ts("1us/1ns")) == 1);
+    CHECK(std::count(all.begin(), all.end(), ts("1ms/1ms")) == 1);
+
+    // only `timeprecision 1ps;` is declared: the unit half comes from the directive in force at the member, the precision half from the declaration
+    CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ps"));
+    CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1ms/1ps"));
+}

@@ -37,6 +37,10 @@ public:
 
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::CompilationUnit; }
 
+    /// SVMake IO-D1f-a3: which halves of the unit's time scale a `timeunit` / `timeprecision` declaration set.
+    bool declaresTimeUnit() const { return unitsRange.has_value(); }
+    bool declaresTimePrecision() const { return precisionRange.has_value(); }
+
 private:
     // Used for tracking whether a time scale directive is first in scope.
     bool anyMembers = false;

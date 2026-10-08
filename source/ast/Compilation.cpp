@@ -39,6 +39,22 @@ const PackageSymbol& createStdPackage(Compilation&);
 
 namespace slang::ast {
 
+std::vector<TimeScale> Compilation::getAllMemberDirectiveTimeScales() const {
+    std::vector<TimeScale> result;
+    for (auto& [node, scale] : memberTimeScales) {
+        if (!node->parent || node->parent->kind != SyntaxKind::CompilationUnit)
+            continue;
+        if (node->kind == SyntaxKind::FunctionDeclaration || node->kind == SyntaxKind::TaskDeclaration) {
+            // an out-of-block definition `function void C::f()` belongs to its class
+            auto& proto = *node->as<FunctionDeclarationSyntax>().prototype;
+            if (proto.name->kind == SyntaxKind::ScopedName)
+                continue;
+        }
+        result.push_back(scale);
+    }
+    return result;
+}
+
 Compilation::Compilation(const Bag& options, const SourceLibrary* defaultLib) :
     options(options.getOrDefault<CompilationOptions>()), tempDiag({}, {}), netAliasAllocator(*this),
     defaultLibPtr(defaultLib) {

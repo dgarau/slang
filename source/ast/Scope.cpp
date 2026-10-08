@@ -92,10 +92,26 @@ std::optional<TimeScale> Scope::getTimeScale() const {
             case SymbolKind::CompilationUnit: {
                 // A `timeunit` declaration is the unit's own scale and wins. Without one, a class or a
                 // subroutine declared at the unit takes the `timescale directive in force where it began.
-                auto& declared = sym.as<CompilationUnitSymbol>().timeScale;
-                if (declared || !unitMember)
+                auto& unit = sym.as<CompilationUnitSymbol>();
+                auto& declared = unit.timeScale;
+                if (!unitMember)
                     return declared;
-                return getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
+                auto directive = getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
+                if (!declared)
+                    return directive;
+                // Declared by `timeunit` and/or `timeprecision`: each half the unit declares wins, the half it
+                // does not declare comes from the directive (a unit with only one half declared and no
+                // directive keeps the built-in default for the other, as before).
+                const bool hasUnit = unit.declaresTimeUnit();
+                const bool hasPrecision = unit.declaresTimePrecision();
+                if (hasUnit == hasPrecision || !directive)
+                    return declared;
+                TimeScale merged = *declared;
+                if (!hasUnit)
+                    merged.base = directive->base;
+                if (!hasPrecision)
+                    merged.precision = directive->precision;
+                return merged;
             }
             case SymbolKind::Package:
                 return sym.as<PackageSymbol>().timeScale;
