@@ -4292,3 +4292,87 @@ endmodule
     CHECK(order[2] == "int,7");
     CHECK(order[3] == "C,2");
 }
+
+TEST_CASE("Empty parameter list on a non-generic class (SVMake FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+class base_type #(type T = int);
+endclass
+class default_type extends base_type;
+endclass
+class base_none;
+    function int width(); return 1; endfunction
+endclass
+class paren_none extends base_none#();
+    function int width(); return 2; endfunction
+endclass
+typedef base_none alias_none;
+module m;
+    base_type#() bt;
+    base_none#() bn;
+    paren_none#() pp;
+    alias_none#() al;
+    initial begin
+        bn = pp;
+        al = bn;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Non-empty parameter list on a non-generic class stays an error (FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+class base_none;
+    static function int sf(); return 1; endfunction
+endclass
+module m;
+    base_none#(1) a;
+    int b = base_none#(1)::sf();
+    $unit::base_none#(1) c;
+    base_none #() ok;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    // exactly the three `#(1)` uses (type name, scoped name, downward name); the `#()`
+    // use on the class (`ok`) is accepted.
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::NotAGenericClass);
+    CHECK(diags[1].code == diag::NotAGenericClass);
+    CHECK(diags[2].code == diag::NotAGenericClass);
+}
+
+TEST_CASE("Empty parameter list on a non-generic class, scoped and package forms (FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+package pk;
+  class pc;
+    static function int sf(); return 5; endfunction
+  endclass
+endpackage
+class base_none;
+  static function int sf(); return 1; endfunction
+endclass
+class d extends base_none#();
+endclass
+class d2 extends pk::pc#();
+endclass
+module m;
+  int a = base_none#()::sf();
+  int b = d::sf();
+  pk::pc#() x;
+  $unit::base_none#() y;
+  int c = pk::pc#()::sf();
+  localparam int e = base_none#()::sf();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

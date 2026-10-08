@@ -287,6 +287,16 @@ const Symbol* findCloseMatch(std::string_view name, const Scope& scope) {
     return nullptr;
 }
 
+// SVMake FRONT-r6: an empty parameter value list `#()` on a class that has no parameter
+// port list names the class itself (accepted by Xcelium and VCS; the LRM is silent).
+bool isEmptyParamListOnPlainClass(const Symbol& symbol, const ParameterValueAssignmentSyntax& pa) {
+    if (!pa.parameters.empty())
+        return false;
+    if (symbol.kind == SymbolKind::ClassType)
+        return true;
+    return symbol.isType() && symbol.as<Type>().getCanonicalType().isClass();
+}
+
 // Returns true if the lookup was ok, or if it failed in a way that allows us to continue
 // looking up in other ways. Returns false if the entire lookup has failed and should be
 // aborted.
@@ -298,7 +308,8 @@ bool lookupDownward(std::span<const NamePlusLoc> nameParts, NameComponents name,
     // Helper function to check whether class parameter assignments have been
     // incorrectly supplied for a non-class symbol.
     auto checkClassParams = [&](const NameComponents& nc) {
-        if (symbol && symbol->kind != SymbolKind::GenericClassDef && nc.paramAssignments) {
+        if (symbol && symbol->kind != SymbolKind::GenericClassDef && nc.paramAssignments &&
+            !isEmptyParamListOnPlainClass(*symbol, *nc.paramAssignments)) {
             auto& diag = result.addDiag(*context.scope, diag::NotAGenericClass,
                                         nc.paramAssignments->getFirstToken().location());
             diag << nc.range;
@@ -819,7 +830,8 @@ bool resolveColonNames(SmallVectorBase<NamePlusLoc>& nameParts, int colonParts,
                 symbol = parent;
             }
         }
-        else if (name.paramAssignments) {
+        else if (name.paramAssignments &&
+                 !isEmptyParamListOnPlainClass(*symbol, *name.paramAssignments)) {
             auto& diag = result.addDiag(*context.scope, diag::NotAGenericClass, name.range);
             diag << symbol->name;
             diag.addNote(diag::NoteDeclarationHere, symbol->location);
@@ -1244,7 +1256,11 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
     }
 
     if (result.found && name.paramAssignments) {
-        if (result.found->kind != SymbolKind::GenericClassDef) {
+        if (result.found->kind != SymbolKind::GenericClassDef &&
+            isEmptyParamListOnPlainClass(*result.found, *name.paramAssignments)) {
+            // `#()` on a non-generic class: the plain class (SVMake FRONT-r6).
+        }
+        else if (result.found->kind != SymbolKind::GenericClassDef) {
             auto& diag = result.addDiag(scope, diag::NotAGenericClass, syntax.sourceRange());
             diag << result.found->name;
             diag.addNote(diag::NoteDeclarationHere, result.found->location);

@@ -1360,3 +1360,80 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::CouldNotResolveHierarchicalPath);
 }
+
+TEST_CASE("Modport selected through a virtual interface value (SVMake FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+interface I(input logic clk);
+    logic [7:0] data;
+    clocking cb @(posedge clk);
+        input data;
+    endclocking
+    modport mp(input data);
+    modport other(output data);
+    modport passive(clocking cb);
+endinterface
+
+class Ctx;
+    virtual I vif;
+endclass
+
+module m;
+    logic clk;
+    I inst(clk);
+    virtual I.mp sig_a, sig_b, sig_c, sig_d;
+    virtual I.passive pm;
+    logic [7:0] r;
+    function automatic virtual I.mp pick(virtual I v);
+        return v.mp;
+    endfunction
+    initial begin
+        automatic Ctx c = new;
+        automatic virtual I tmp = inst;
+        c.vif = inst;
+        sig_a = tmp;
+        sig_b = inst.mp;
+        sig_c = tmp.mp;
+        sig_d = c.vif.mp;
+        pm = tmp.passive;
+        r = tmp.mp.data;
+        r = c.vif.mp.data;
+        r = pm.cb.data;
+        sig_a = pick(tmp);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Modport select through a virtual interface value stays strict (FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+interface I;
+    logic [7:0] data;
+    modport mp(input data);
+    modport other(output data);
+endinterface
+
+module m;
+    I inst();
+    virtual I tmp = inst;
+    virtual I.mp narrowed = inst;
+    virtual I.other oth;
+    initial begin
+        oth = tmp.mp;       // wrong modport: not assignable
+        tmp.mp = tmp;       // not an lvalue
+        oth = narrowed.mp;  // vif already has a modport: name not found
+        oth = tmp.nope;     // unknown member
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    // One error per statement; none may be silently accepted.
+    CHECK(diags.size() == 4);
+}

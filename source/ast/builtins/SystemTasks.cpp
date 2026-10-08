@@ -49,6 +49,17 @@ public:
     }
 };
 
+// SVMake FRONT-r6: every argument of $timeformat may be left empty (Questa, Xcelium, VCS and
+// Riviera-PRO accept `$timeformat(-9,,,)`); an empty or omitted argument takes Table 20-3's default.
+class TimeFormatTask : public SimpleSystemTask {
+public:
+    TimeFormatTask(const Type& voidType, const Type& intType, const Type& stringType) :
+        SimpleSystemTask(KnownSystemName::TimeFormat, voidType, 0,
+                         std::vector<const Type*>{&intType, &intType, &stringType, &intType}) {}
+
+    bool allowEmptyArgument(size_t) const final { return true; }
+};
+
 class DisplayTask : public SystemTaskBase {
 public:
     LiteralBase defaultIntFmt;
@@ -1040,7 +1051,7 @@ void Builtins::registerSystemTasks() {
 
     TASK(KnownSystemName::Exit, 0, );
 
-    TASK(KnownSystemName::TimeFormat, 0, &intType, &intType, &stringType, &intType);
+    addSystemSubroutine(std::make_shared<TimeFormatTask>(voidType, intType, stringType));
 
     TASK(KnownSystemName::MonitorOn, 0, );
     TASK(KnownSystemName::MonitorOff, 0, );

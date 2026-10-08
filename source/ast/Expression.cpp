@@ -1205,6 +1205,21 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
                 break;
             }
             [[fallthrough]];
+        case SymbolKind::Modport:
+            // SVMake FRONT-r6: a modport selected through a virtual interface VALUE
+            // (`tmp.mp`, `c.vif.mp`) is the same conversion as `sig = tmp` narrowed to
+            // that modport (accepted 3-0 by Questa, Xcelium and VCS).
+            if (accessViaExpr && symbol->kind == SymbolKind::Modport &&
+                accessViaExpr->type->isVirtualInterface() && result.selectors.empty() &&
+                !context.flags.has(ASTFlags::LValue)) {
+                auto& vit = accessViaExpr->type->getCanonicalType().as<VirtualInterfaceType>();
+                auto type = comp.emplace<VirtualInterfaceType>(
+                    vit.iface, &symbol->as<ModportSymbol>(),
+                    /* isRealIface */ false, result.nameRange.start());
+                expr = &convertAssignment(context, *type, *accessViaExpr, result.nameRange);
+                break;
+            }
+            [[fallthrough]];
         default: {
             const bool constraintAllowed = !result.selectors.empty();
             auto hierRef = HierarchicalReference::fromLookup(comp, result);

@@ -2626,3 +2626,47 @@ endmodule
     CHECK(diags[0].code == diag::InvalidStringArg);
     CHECK(diags[1].code == diag::InvalidStringArg);
 }
+
+TEST_CASE("$timeformat accepts empty arguments (SVMake FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    initial begin
+        $timeformat(-9,,,);
+        $timeformat(-9,," ns",);
+        $timeformat(,,,);
+        $timeformat(,3);
+        $timeformat();
+        $timeformat(-9);
+        $timeformat(-9, 3, " ns", 12);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("$timeformat: too many arguments, and other tasks still reject empty arguments") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    initial begin
+        $timeformat(-9,,,,);
+        $dumpfile(,);
+        $finish(,);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    size_t tooMany = 0, empty = 0;
+    for (auto& d : diags) {
+        tooMany += d.code == diag::TooManyArguments;
+        empty += d.code == diag::EmptyArgNotAllowed;
+    }
+    CHECK(tooMany >= 1);
+    CHECK(empty >= 2);
+}
