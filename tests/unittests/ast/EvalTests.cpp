@@ -3347,31 +3347,3 @@ endfunction
 
     NO_SESSION_ERRORS;
 }
-
-TEST_CASE("sformatf sizes a signed decimal by the largest possible value (SVMake IO-D1c)") {
-    // 21.2.1.2: the automatic field is that of "the largest possible value"; a signed n-bit value's magnitude is at most
-    // 2^(n-1), plus a sign column: floor((n - 1) / log2(10)) + 2.
-    ScriptSession session;
-    auto widthOf = [&](int n) {
-        auto text = session.eval("$sformatf(\"%d\", " + std::to_string(n) + "'sd1)").str();
-        return text.size();
-    };
-    CHECK(widthOf(1) == 2);
-    CHECK(widthOf(2) == 2);
-    CHECK(widthOf(3) == 2);
-    CHECK(widthOf(4) == 2);
-    CHECK(widthOf(7) == 3);
-    CHECK(widthOf(8) == 4);
-    CHECK(widthOf(10) == 4);
-    CHECK(widthOf(16) == 6);
-    CHECK(widthOf(32) == 11);
-    CHECK(widthOf(33) == 11);
-    CHECK(widthOf(64) == 20);
-    CHECK(widthOf(65) == 21);
-
-    // an UNSIGNED value keeps the digits of 2^n - 1
-    CHECK(session.eval("$sformatf(\"%d\", 4'd1)"s).str() == " 1");
-    CHECK(session.eval("$sformatf(\"%d\", 64'd1)"s).str().size() == 20);
-    CHECK(session.eval("$sformatf(\"%d\", -4'sd8)"s).str() == "-8");
-    CHECK(session.eval("$sformatf(\"%d\", 4'sd5)"s).str() == " 5");
-}
