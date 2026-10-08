@@ -1434,6 +1434,47 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    // One error per statement; none may be silently accepted.
-    CHECK(diags.size() == 4);
+    // One error per statement, by CODE; none may be silently accepted.
+    REQUIRE(diags.size() == 4);
+    CHECK(diags[0].code == diag::BadAssignment);
+    CHECK(diags[1].code == diag::NotAValue);
+    CHECK(diags[2].code == diag::InvalidModportAccess);
+    CHECK(diags[3].code == diag::CouldNotResolveHierarchicalPath);
+}
+
+TEST_CASE("Modport of a NESTED interface selected through a virtual interface stays refused (FRONT-r6)") {
+    // `va.sub.rd` names a modport of the nested instance `sub`, not of the handle's own interface:
+    // typing it as `virtual top_if.rd` was a wrong type (and a silent wrong value). Refused.
+    auto tree = SyntaxTree::fromText(R"(
+interface leaf;
+    logic [7:0] v;
+    modport rd(input v);
+endinterface
+interface top_if;
+    leaf sub();
+    leaf sub2();
+    logic d;
+    modport mp(input d);
+endinterface
+
+module m;
+    top_if a();
+    virtual top_if va = a;
+    virtual leaf.rd lr;
+    initial begin
+        lr = va.sub.rd;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    bool sawNotAValue = false;
+    for (auto& d : diags)
+        sawNotAValue |= d.code == diag::NotAValue;
+    CHECK(sawNotAValue);
+    for (auto& d : diags)
+        CHECK(d.code != diag::BadAssignment);
 }

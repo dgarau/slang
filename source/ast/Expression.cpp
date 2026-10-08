@@ -1213,11 +1213,17 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
                 accessViaExpr->type->isVirtualInterface() && result.selectors.empty() &&
                 !context.flags.has(ASTFlags::LValue)) {
                 auto& vit = accessViaExpr->type->getCanonicalType().as<VirtualInterfaceType>();
-                auto type = comp.emplace<VirtualInterfaceType>(
-                    vit.iface, &symbol->as<ModportSymbol>(),
-                    /* isRealIface */ false, result.nameRange.start());
-                expr = &convertAssignment(context, *type, *accessViaExpr, result.nameRange);
-                break;
+                // Only a modport of the handle's OWN interface: `va.sub.rd` names a modport of a
+                // NESTED interface instance, which `vit.iface` is not (typing it as
+                // `virtual top_if.rd` would be a wrong type). That form stays refused (NotAValue)
+                // until it is probed (FRONT-r6b scope).
+                if (symbol->getParentScope() == &vit.iface.body) {
+                    auto type = comp.emplace<VirtualInterfaceType>(
+                        vit.iface, &symbol->as<ModportSymbol>(),
+                        /* isRealIface */ false, result.nameRange.start());
+                    expr = &convertAssignment(context, *type, *accessViaExpr, result.nameRange);
+                    break;
+                }
             }
             [[fallthrough]];
         default: {

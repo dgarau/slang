@@ -4376,3 +4376,34 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("Empty parameter list: implements, nested class, and generic specializations (FRONT-r6)") {
+    auto tree = SyntaxTree::fromText(R"(
+class gen #(int N = 1);
+    int v = N;
+endclass
+typedef gen#(9) g9;
+interface class IC;
+    pure virtual function int f();
+endclass
+class impl implements IC#();
+    virtual function int f(); return 1; endfunction
+endclass
+class outer;
+    class inner;
+    endclass
+endclass
+module m;
+    outer::inner#() b;   // nested class without a parameter port list: accepted
+    gen#() ok;           // generic class: unchanged
+    g9#() a;             // typedef of a specialization has a parameter port list: stays an error
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::NotAGenericClass);
+}

@@ -292,9 +292,12 @@ const Symbol* findCloseMatch(std::string_view name, const Scope& scope) {
 bool isEmptyParamListOnPlainClass(const Symbol& symbol, const ParameterValueAssignmentSyntax& pa) {
     if (!pa.parameters.empty())
         return false;
-    if (symbol.kind == SymbolKind::ClassType)
-        return true;
-    return symbol.isType() && symbol.as<Type>().getCanonicalType().isClass();
+    // A specialization of a generic class (or a typedef of one) has a parameter port list:
+    // `#()` on it stays an error.
+    if (!symbol.isType())
+        return false;
+    auto& type = symbol.as<Type>().getCanonicalType();
+    return type.isClass() && type.as<ClassType>().genericClass == nullptr;
 }
 
 // Returns true if the lookup was ok, or if it failed in a way that allows us to continue
