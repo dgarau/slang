@@ -592,10 +592,27 @@ static bool isValidForceLVal(const Expression& expr, const ASTContext& context, 
                     context.addDiag(diag::BadForceNetType, expr.sourceRange);
             }
             return true;
-        case ExpressionKind::MemberAccess:
-            return isValidForceLVal(expr.as<MemberAccessExpression>().value(), context, true);
-        case ExpressionKind::ElementSelect:
-            return isValidForceLVal(expr.as<ElementSelectExpression>().value(), context, true);
+        case ExpressionKind::MemberAccess: {
+            // 1800-2023 10.6.2: only a bit-select or part-select of a variable is illegal, so a
+            // member of an unpacked struct or union is a singular variable path (SVMake NETS-e).
+            auto& value = expr.as<MemberAccessExpression>().value();
+            auto& vt = value.type->getCanonicalType();
+            bool unpackedParent = vt.isUnpackedStruct() || vt.isUnpackedUnion();
+            return isValidForceLVal(value, context, unpackedParent ? inSelect : true);
+        }
+        case ExpressionKind::ElementSelect: {
+            // An element of a fixed-size unpacked array chosen by a constant index likewise.
+            auto& sel = expr.as<ElementSelectExpression>();
+            auto& vt = sel.value().type->getCanonicalType();
+            bool unpackedParent = false;
+            if (vt.kind == SymbolKind::FixedSizeUnpackedArrayType) {
+                // Evaluated in a throwaway context: a non-constant index is not a diagnostic here,
+                // it only makes the path not a constant one.
+                EvalContext evalCtx(context);
+                unpackedParent = !sel.selector().eval(evalCtx).bad();
+            }
+            return isValidForceLVal(sel.value(), context, unpackedParent ? inSelect : true);
+        }
         case ExpressionKind::RangeSelect:
             return isValidForceLVal(expr.as<RangeSelectExpression>().value(), context, true);
         case ExpressionKind::Concatenation:

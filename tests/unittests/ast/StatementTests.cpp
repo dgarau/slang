@@ -1181,6 +1181,66 @@ endmodule
     CHECK(diags[5].code == diag::AutoFromNonProcedural);
 }
 
+TEST_CASE("Force of an unpacked element or member of a variable (SVMake NETS-e)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef struct { logic [7:0] a; struct { int b; } in; } s_t;
+    typedef logic [6:0] row_t[3:1];
+    typedef row_t mat_t[-1:0];
+    logic [7:0] mem[4];
+    mat_t mat;
+    s_t us;
+    s_t ua[2];
+    union { int x; shortint y; } un;
+    logic [7:0] q[$];
+    int k;
+    logic [7:0] v;
+    wire [7:0] wmem[2];
+
+    initial begin
+        // Legal: a singular unpacked path rooted at a variable, selectors constant.
+        force mem[1] = 8'haa;
+        release mem[1];
+        force mat[-1][2] = 7'h65;
+        release mat[0][1];
+        force us.a = 1;
+        force us.in.b = 2;
+        release us.in.b;
+        force ua[1].in.b = 3;
+        force un.x = 4;
+        force wmem[1] = 1;
+        // Illegal: a bit-select or part-select of a variable, whatever precedes it.
+        force v[3] = 1;
+        force v[3:0] = 1;
+        force mem[1][3] = 1;
+        force mem[1][3:0] = 1;
+        force mat[-1][2][0] = 1;
+        force us.a[0] = 1;
+        force ua[1].a[3:0] = 1;
+        release mem[1][2];
+        // Illegal: a slice (not singular), an element of a queue (the binder itself adds a
+        // diagnostic for it, and a non-constant index is rejected before this check runs).
+        force mem[1:2] = '{1, 2};
+        force q[0] = 1;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 11);
+    size_t badForce = 0;
+    for (auto& d : diags) {
+        if (d.code == diag::BadProceduralForce)
+            badForce++;
+        else
+            CHECK(d.code == diag::DynamicNotProcedural);
+    }
+    CHECK(badForce == 10);
+}
+
 TEST_CASE("Unexpected port decls") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
