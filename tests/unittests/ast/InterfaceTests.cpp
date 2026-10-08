@@ -899,6 +899,186 @@ endmodule
     CHECK(diags[2].code == diag::ModportMemberParent);
 }
 
+// SVMake FRONT-r6b -- a modport expression naming a member of a NESTED interface instance
+// (also through an element of an instance array, at any depth). PROVISIONAL: the LRM (25.5.4)
+// does not say; Questa and Riviera-PRO accept (a probe, round 6: `b0 d0`, `be be`, `ac cdf0 de`),
+// Xcelium (MODPXE) and VCS (SV-FNYI) report an implementation gap, not a rule. Upward, absolute,
+// sibling and generate-block names stay errors (the S4 cases below).
+static std::vector<DiagCode> modportExprCodes(const std::string& text) {
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    std::vector<DiagCode> codes;
+    for (auto& diag : compilation.getAllDiagnostics())
+        codes.push_back(diag.code);
+    return codes;
+}
+
+TEST_CASE("Modport expression naming a nested instance member: one level (S1)") {
+    auto tree = SyntaxTree::fromText(R"(
+interface leaf_if;
+    logic [7:0] v;
+endinterface
+
+interface outer_if;
+    leaf_if inner ();
+    modport mp(output .w(inner.v), input .r(inner.v));
+endinterface
+
+module c(outer_if.mp p);
+    assign p.w = p.r + 1;
+endmodule
+
+module top;
+    outer_if o();
+    c c1(.p(o));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Modport expression naming a nested instance member: three and four levels (S2)") {
+    auto tree = SyntaxTree::fromText(R"(
+interface inner_if;
+    logic [7:0] data;
+endinterface
+interface middle_if;
+    inner_if inner ();
+endinterface
+interface outer_if;
+    middle_if middle ();
+    modport mp(output .deep_out(middle.inner.data), input .deep_in(middle.inner.data));
+endinterface
+interface l1_if; logic [7:0] val; endinterface
+interface l2_if; l1_if l1 (); endinterface
+interface l3_if; l2_if l2 (); endinterface
+interface l4_if;
+    l3_if l3 ();
+    modport mp(output .w(l3.l2.l1.val), input .r(l3.l2.l1.val));
+endinterface
+
+module top;
+    outer_if o();
+    l4_if l4();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Modport expression naming a nested instance member: array elements (S3)") {
+    auto tree = SyntaxTree::fromText(R"(
+interface base_if;
+    logic [7:0] wr;
+    logic [7:0] rd;
+endinterface
+interface cont_if;
+    base_if ch[2] ();
+    base_if grid[2][3] ();
+    modport mp(input .a_wr(ch[0].wr), output .a_rd(ch[0].rd),
+               input .b_wr(ch[1].wr), output .b_rd(ch[1].rd),
+               input .g_wr(grid[1][2].wr), output .g_rd(grid[1][2].rd));
+endinterface
+
+module top;
+    cont_if c();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Modport expression naming a nested instance member: names that stay errors (S4)") {
+    // (a) upward / absolute, (b) a sibling instance of the enclosing module, (c) a generate
+    // block member of the interface itself, (d) a generate block member INSIDE the nested
+    // instance, (e) the nested instance's own interface port, (f) the interface's own name.
+    const std::string common = R"(
+interface leaf_if;
+    logic [7:0] v;
+endinterface
+interface gen_if;
+    if (1) begin : g
+        logic [7:0] x;
+    end
+endinterface
+interface port_if(leaf_if pif);
+endinterface
+)";
+    auto only = [&](const std::string& body) {
+        return modportExprCodes(common + body);
+    };
+    auto bad = [](const std::vector<DiagCode>& codes) {
+        // The diagnostic is present (a module that is also instantiated is elaborated twice,
+        // once as a top of its own, so one source error can be reported twice; unused-definition
+        // style warnings are not the point).
+        return std::find(codes.begin(), codes.end(), diag::ModportMemberParent) != codes.end();
+    };
+
+    CHECK(bad(only(R"(
+module m;
+    logic [7:0] outer_v;
+    holder h();
+endmodule
+interface holder;
+    modport mp(input .q(m.outer_v));
+endinterface
+module top; m mi(); endmodule
+)")));
+
+    CHECK(bad(only(R"(
+module m;
+    leaf_if sib ();
+    holder h();
+endmodule
+interface holder;
+    modport mp(input .q(m.sib.v));
+endinterface
+module top; m mi(); endmodule
+)")));
+
+    CHECK(bad(only(R"(
+interface holder;
+    if (1) begin : g
+        logic [7:0] gv;
+    end
+    modport mp(input .q(g.gv));
+endinterface
+module top; holder h(); endmodule
+)")));
+
+    CHECK(bad(only(R"(
+interface holder;
+    gen_if inner ();
+    modport mp(input .q(inner.g.x));
+endinterface
+module top; holder h(); endmodule
+)")));
+
+    CHECK(bad(only(R"(
+interface holder;
+    leaf_if src ();
+    port_if inner (src);
+    modport mp(input .q(inner.pif.v));
+endinterface
+module top; holder h(); endmodule
+)")));
+
+    CHECK(bad(only(R"(
+interface holder;
+    leaf_if inner ();
+    modport mp(input .q(holder.inner.v));
+endinterface
+module top; holder h(); endmodule
+)")));
+}
+
 TEST_CASE("Interface containing virtual interface infinite loop regress") {
     auto tree = SyntaxTree::fromText(R"(
 interface I;

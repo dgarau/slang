@@ -220,6 +220,29 @@ ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& context,
     return *result;
 }
 
+// SVMake FRONT-r6b: true if `ref` descends only through instances / instance arrays whose root
+// is declared directly in `scope`, ending at the referenced member of the innermost instance.
+static bool isOwnNestedInstanceMember(const HierarchicalReference& ref, const Scope* scope) {
+    auto path = ref.path;
+    if (ref.upwardCount != 0 || path.size() < 2)
+        return false;
+
+    auto isInst = [](const Symbol& sym) {
+        return sym.kind == SymbolKind::Instance || sym.kind == SymbolKind::InstanceArray;
+    };
+
+    if (!isInst(*path[0].symbol) || path[0].symbol->getParentScope() != scope)
+        return false;
+
+    // Every element but the last must be an instance (array); the last is the member itself.
+    for (size_t i = 0; i + 1 < path.size(); i++) {
+        if (!isInst(*path[i].symbol))
+            return false;
+    }
+
+    return path.back().symbol == ref.target;
+}
+
 ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext,
                                                  ArgumentDirection direction,
                                                  const ModportExplicitPortSyntax& syntax) {
@@ -262,6 +285,16 @@ ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext
         if (hierVal) {
             auto& ref = hierVal->ref;
             if (ref.isViaIfacePort() && ref.path[0].symbol->getParentScope() == context.scope)
+                return;
+
+            // SVMake FRONT-r6b -- a reference that goes DOWNWARD only, through instances (or
+            // elements of instance arrays) declared directly in this interface's body, to a
+            // member of the innermost one: `.p(inner.val)`, `.p(ch[0].wr)`, `.p(a.b.c.v)`. Such a
+            // name is a member of the containing interface in the sense of 25.5.4 (it is
+            // reached through the interface's own nested instances). Upward, `$root`, sibling
+            // and generate-block names stay errors. PROVISIONAL: the LRM is silent here; Questa and
+            // Riviera-PRO accept, Xcelium and VCS report an implementation gap (SVMake round-6 probes).
+            if (isOwnNestedInstanceMember(ref, context.scope))
                 return;
         }
 
