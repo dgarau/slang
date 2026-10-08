@@ -84,18 +84,33 @@ const NetType& Scope::getDefaultNetType() const {
 
 std::optional<TimeScale> Scope::getTimeScale() const {
     const Scope* current = this;
+    // SVMake IO-D1f-a3: the outermost class or subroutine below a compilation unit on the way up.
+    const Symbol* unitMember = nullptr;
     do {
         auto& sym = current->asSymbol();
         switch (sym.kind) {
-            case SymbolKind::CompilationUnit:
-                return sym.as<CompilationUnitSymbol>().timeScale;
+            case SymbolKind::CompilationUnit: {
+                // A `timeunit` declaration is the unit's own scale and wins. Without one, a class or a
+                // subroutine declared at the unit takes the `timescale directive in force where it began.
+                auto& declared = sym.as<CompilationUnitSymbol>().timeScale;
+                if (declared || !unitMember)
+                    return declared;
+                return getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
+            }
             case SymbolKind::Package:
                 return sym.as<PackageSymbol>().timeScale;
             case SymbolKind::InstanceBody:
                 return sym.as<InstanceBodySymbol>().getDefinition().timeScale;
-            default:
-                current = sym.getParentScope();
+            default: {
+                auto parent = sym.getParentScope();
+                if (parent && parent->asSymbol().kind == SymbolKind::CompilationUnit &&
+                    (sym.kind == SymbolKind::ClassType || sym.kind == SymbolKind::Subroutine ||
+                     sym.kind == SymbolKind::GenericClassDef)) {
+                    unitMember = &sym;
+                }
+                current = parent;
                 break;
+            }
         }
     } while (current);
 

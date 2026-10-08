@@ -34,6 +34,13 @@ struct SLANG_EXPORT ParserMetadata {
     /// Class and checker declarations at any scope. Module-like declarations are in @a nodeMeta.
     std::vector<const syntax::SyntaxNode*> decls;
 
+    /// The `timescale directive in force where each class declaration and each function or task
+    /// declaration began (only those with one). A compilation-unit member has no time scale of its own
+    /// in the standard's sense -- `timeunit` declares the unit's -- but a tool that scales a delay in a
+    /// `$unit` class by the directive in force at the class needs it (SVMake IO-D1f-a3).
+    /// Keyed on the declaration SYNTAX, so a generic class's specializations find it too.
+    std::vector<std::pair<const syntax::SyntaxNode*, TimeScale>> memberTimeScales;
+
     /// Potential dependency references: hierarchy and checker instantiations, identifier names
     /// preceding a double colon, package import declarations, and virtual interface types.
     /// Hierarchy instantiations are included only for global modules/interfaces/programs.
