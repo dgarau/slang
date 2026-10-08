@@ -201,6 +201,9 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
     root->addMember(*unit);
     compilationUnits.push_back(unit);
 
+    for (auto& [n, scale] : tree->getMetadata().memberTimeScales)
+        memberTimeScales.emplace(n, scale);
+
     for (auto& [n, meta] : tree->getMetadata().nodeMeta) {
         SyntaxMetadata result;
         result.tree = tree.get();

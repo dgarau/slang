@@ -2467,3 +2467,92 @@ alias;
     compilation.addSyntaxTree(tree);
     compilation.getAllDiagnostics();
 }
+
+TEST_CASE("A class or subroutine declared at the compilation unit takes the timescale directive in force where it began (SVMake IO-D1f-a3)") {
+    auto tree = SyntaxTree::fromText(R"(
+class Before;
+    function void f(); endfunction
+endclass
+
+`timescale 1ps / 1ps
+class A;
+    extern function void g();
+    function void f(); endfunction
+endclass
+function void uf(); endfunction
+
+`timescale 1ns / 1ps
+class B #(type T = int);
+    function void f(); endfunction
+endclass
+typedef B#(int) bi_t;
+typedef B#(real) br_t;
+
+`timescale 1us / 1us
+// an out-of-block definition: the class's directive wins (the slang parent is the class); PROVISIONAL, no tool data
+function void A::g(); endfunction
+
+`timescale 1ms / 1ms
+class Mid;
+`timescale 1s / 1s
+    int x;
+    function void f(); endfunction
+endclass
+
+module m;
+    bi_t bi;
+    br_t br;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    auto& unit = *compilation.getCompilationUnits()[0];
+    auto cls = [&](std::string_view name) -> const ClassType& { return unit.find<ClassType>(name); };
+    auto method = [&](const ClassType& c, std::string_view name) -> const Scope& {
+        return c.find<SubroutineSymbol>(name);
+    };
+
+    // no directive in force at the declaration: nothing (not the later directive)
+    CHECK(!cls("Before").getTimeScale());
+    CHECK(!method(cls("Before"), "f").getTimeScale());
+
+    CHECK(cls("A").getTimeScale() == ts("1ps/1ps"));
+    CHECK(method(cls("A"), "f").getTimeScale() == ts("1ps/1ps"));
+    CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1ps/1ps"));
+    CHECK(method(cls("A"), "g").getTimeScale() == ts("1ps/1ps"));   // not the 1us/1us at the definition
+
+    // a generic class's specializations are parented outside the unit's member list: keyed on the declaration syntax
+    auto& m = *compilation.getRoot().topInstances[0];
+    auto& bi = m.body.find<VariableSymbol>("bi").getType().getCanonicalType().as<ClassType>();
+    auto& br = m.body.find<VariableSymbol>("br").getType().getCanonicalType().as<ClassType>();
+    CHECK(&bi != &br);
+    CHECK(bi.getTimeScale() == ts("1ns/1ps"));
+    CHECK(br.getTimeScale() == ts("1ns/1ps"));
+    CHECK(method(bi, "f").getTimeScale() == ts("1ns/1ps"));
+    CHECK(method(br, "f").getTimeScale() == ts("1ns/1ps"));
+
+    // a directive INSIDE the class body does not change the class's: the header's wins
+    CHECK(cls("Mid").getTimeScale() == ts("1ms/1ms"));
+    CHECK(method(cls("Mid"), "f").getTimeScale() == ts("1ms/1ms"));
+}
+
+TEST_CASE("A compilation unit's own timeunit beats the directive for its classes (SVMake IO-D1f-a3)") {
+    auto tree = SyntaxTree::fromText(R"(
+timeunit 10ns / 10ps;
+`timescale 1ps / 1ps
+class A;
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    CHECK(compilation.getCompilationUnits()[0]->find<ClassType>("A").getTimeScale() == ts("10ns/10ps"));
+    CHECK(compilation.getAllMemberDirectiveTimeScales().size() == 1);
+}

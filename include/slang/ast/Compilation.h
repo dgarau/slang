@@ -704,6 +704,27 @@ public:
     /// Gets the default time scale to use when none is specified in the source code.
     std::optional<TimeScale> getDefaultTimeScale() const { return options.defaultTimeScale; }
 
+    /// SVMake IO-D1f-a3: the `timescale directive that was in force where the class, function or task
+    /// declaration @a syntax began, if any.
+    std::optional<TimeScale> getMemberDirectiveTimeScale(const syntax::SyntaxNode* syntax) const {
+        if (!syntax)
+            return std::nullopt;
+        auto it = memberTimeScales.find(syntax);
+        if (it == memberTimeScales.end())
+            return std::nullopt;
+        return it->second;
+    }
+
+    /// SVMake IO-D1f-a3: every such directive value (one per declaration that had one), in no
+    /// particular order -- for a client that sizes the finest precision of a design.
+    std::vector<TimeScale> getAllMemberDirectiveTimeScales() const {
+        std::vector<TimeScale> result;
+        result.reserve(memberTimeScales.size());
+        for (auto& [node, scale] : memberTimeScales)
+            result.push_back(scale);
+        return result;
+    }
+
     /// Gets the next system ID to use for identifying enum types.
     int getNextEnumSystemId() { return nextEnumSystemId++; }
 
@@ -961,6 +982,9 @@ private:
 
     // Map from syntax nodes to parse-time metadata about them.
     flat_hash_map<const syntax::ModuleDeclarationSyntax*, SyntaxMetadata> syntaxMetadata;
+
+    // SVMake IO-D1f-a3: the `timescale directive in force where a class, function or task declaration began.
+    flat_hash_map<const syntax::SyntaxNode*, TimeScale> memberTimeScales;
 
     // A list of all created definitions, as storage for their memory.
     std::vector<std::unique_ptr<DefinitionSymbol>> definitionMemory;

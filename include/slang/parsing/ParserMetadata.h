@@ -31,6 +31,13 @@ struct SLANG_EXPORT ParserMetadata {
     /// (such as various bits of preprocessor state).
     std::vector<std::pair<const syntax::ModuleDeclarationSyntax*, Node>> nodeMeta;
 
+    /// The `timescale directive in force where each class declaration and each function or task
+    /// declaration began (only those with one). A compilation-unit member has no time scale of its own
+    /// in the standard's sense -- `timeunit` declares the unit's -- but a tool that scales a delay in a
+    /// `$unit` class by the directive in force at the class needs it (SVMake IO-D1f-a3).
+    /// Keyed on the declaration SYNTAX, so a generic class's specializations find it too.
+    std::vector<std::pair<const syntax::SyntaxNode*, TimeScale>> memberTimeScales;
+
     /// A list of all instantiations of global modules/interfaces/programs.
     /// This can be used to determine which modules should be considered as top-level
     /// roots of the design, or to find references of a particular module.

@@ -838,6 +838,7 @@ FunctionDeclarationSyntax& Parser::parseFunctionDeclaration(AttrList attributes,
                                                             bitmask<FunctionOptions> options) {
     Token end;
     bool isConstructor;
+    const auto directiveTimeScale = getPP().getTimeScale();   // SVMake IO-D1f-a3: as for a class declaration
     auto& prototype = parseFunctionPrototype(parentKind,
                                              options | FunctionOptions::AllowImplicitReturn,
                                              &isConstructor);
@@ -855,8 +856,11 @@ FunctionDeclarationSyntax& Parser::parseFunctionDeclaration(AttrList attributes,
         checkBlockNames(nameToken, endBlockName);
 
     previewNode = savedPN;
-    return factory.functionDeclaration(functionKind, attributes, prototype, semi, items, end,
-                                       endBlockName);
+    auto& declaration = factory.functionDeclaration(functionKind, attributes, prototype, semi, items,
+                                                    end, endBlockName);
+    if (directiveTimeScale)
+        meta.memberTimeScales.emplace_back(&declaration, *directiveTimeScale);
+    return declaration;
 }
 
 GenvarDeclarationSyntax& Parser::parseGenvarDeclaration(AttrList attributes) {
@@ -1130,6 +1134,9 @@ SyntaxList<syntax::ClassSpecifierSyntax> Parser::parseClassSpecifierList(bool al
 
 ClassDeclarationSyntax& Parser::parseClassDeclaration(AttrList attributes,
                                                       Token virtualOrInterface) {
+    // SVMake IO-D1f-a3: the directive in force where the declaration BEGINS (a directive inside the body, e.g. from an
+    // included header, does not change the class's).
+    const auto directiveTimeScale = getPP().getTimeScale();
     auto classKeyword = consume();
 
     const bool isIfaceClass = virtualOrInterface.kind == TokenKind::InterfaceKeyword;
@@ -1212,6 +1219,8 @@ ClassDeclarationSyntax& Parser::parseClassDeclaration(AttrList attributes,
                                             implementsClause, semi, members, endClass,
                                             endBlockName);
     meta.classDecls.push_back(&result);
+    if (directiveTimeScale)
+        meta.memberTimeScales.emplace_back(&result, *directiveTimeScale);
     return result;
 }
 
