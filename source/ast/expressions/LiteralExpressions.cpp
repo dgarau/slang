@@ -89,6 +89,39 @@ ConstantValue IntegerLiteral::evalImpl(EvalContext&) const {
     return result;
 }
 
+bool IntegerLiteral::propagateType(const ASTContext& context, const Type& newType, SourceRange,
+                                   ConversionKind) {
+    // [5.7.1] "An unsized unsigned literal constant where the high-order bit is unknown
+    // (X or Z) shall be extended to the size of the expression containing the literal
+    // constant." That is x/z extended rather than zero extended, so an unsized literal
+    // such as 'hx must not be converted as a plain 32-bit value when its context is wider.
+    if (!isDeclaredUnsized || !newType.isIntegral() || !newType.isFourState())
+        return false;
+
+    SVInt value = getValue();
+    bitwidth_t oldWidth = value.getBitWidth();
+    bitwidth_t newWidth = newType.getBitWidth();
+    if (!value.hasUnknown() || newWidth <= oldWidth || !value[oldWidth - 1].isUnknown())
+        return false;
+
+    // Sign extension copies the (unknown) most significant bit into the new high bits.
+    SVInt extended = value.extend(newWidth, /* isSigned */ true);
+    extended.setSigned(newType.isSigned());
+
+    auto& comp = context.getCompilation();
+    valueStorage = SVIntStorage(extended.getBitWidth(), extended.isSigned(), extended.hasUnknown());
+    if (extended.isSingleWord())
+        valueStorage.val = *extended.getRawPtr();
+    else {
+        valueStorage.pVal = (uint64_t*)comp.allocate(sizeof(uint64_t) * extended.getNumWords(),
+                                                     alignof(uint64_t));
+        memcpy(valueStorage.pVal, extended.getRawPtr(), sizeof(uint64_t) * extended.getNumWords());
+    }
+
+    type = &newType;
+    return true;
+}
+
 std::optional<bitwidth_t> IntegerLiteral::getEffectiveWidthImpl() const {
     return ConstantValue(getValue()).getEffectiveWidth();
 }

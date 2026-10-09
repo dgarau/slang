@@ -4763,3 +4763,48 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::BadValueRange);
 }
+
+TEST_CASE("Unsized literal with unknown leftmost digit extends with x/z") {
+    // [5.7.1]: an unsized literal whose high-order bit is X or Z is extended to the size of
+    // the expression containing it with that value, not with zeros.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    localparam bit a = (68'hx_xxxxxxxx_xxxxxxxx === 'hx);
+    localparam bit b = (68'hz_zzzzzzzz_zzzzzzzz === 'hz);
+    localparam bit c = (68'h?_????????_???????? === 'h?);
+    localparam bit d = (68'hx_xxxxxxxx_xxxxxxxx === 'dX);
+    localparam bit e = (68'hz_zzzzzzzz_zzzzzzzz === 'dZ);
+    localparam bit f = (68'h0_0000000f_0000000f === 'h0f);
+    localparam bit g = (68'h0_0000000f_0000000f === 'hf0);
+    localparam logic [67:0] i = 'hx;
+    localparam logic [67:0] j = 'hz1;
+    localparam logic [67:0] k = 'h1;
+    localparam logic [7:0] l = 'hx;
+    localparam bit ei = (i === {68{1'bx}});
+    localparam bit ej = (j === {{64{1'bz}}, 4'h1});
+    localparam bit ek = (k === 68'h1);
+    localparam bit el = (l === 8'hxx);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto get = [&](std::string_view name) {
+        return compilation.getRoot()
+            .lookupName<ParameterSymbol>("m." + std::string(name))
+            .getValue();
+    };
+    CHECK(get("a").integer() == 1);
+    CHECK(get("b").integer() == 1);
+    CHECK(get("c").integer() == 1);
+    CHECK(get("d").integer() == 1);
+    CHECK(get("e").integer() == 1);
+    CHECK(get("f").integer() == 0);
+    CHECK(get("g").integer() == 0);
+    CHECK(get("ei").integer() == 1);
+    CHECK(get("ej").integer() == 1);
+    CHECK(get("ek").integer() == 1);
+    CHECK(get("el").integer() == 1);
+}
