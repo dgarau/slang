@@ -51,6 +51,13 @@ struct SLANG_EXPORT ParserMetadata {
     /// Hierarchy instantiations are included only for global modules/interfaces/programs.
     std::vector<const syntax::SyntaxNode*> refs;
 
+    /// A list of all primitive-style instantiations whose type is an identifier
+    /// (i.e. `name #value inst();`, which is a user-defined primitive or, when the
+    /// compilation allows bare value parameter assignments, a module instantiation).
+    /// Their type names are references to global definitions just like the hierarchy
+    /// instantiations in refs (SVMake FRONT, D-061).
+    std::vector<const syntax::PrimitiveInstantiationSyntax*> globalPrimitiveInstances;
+
     /// A list of all enum types parsed.
     std::vector<const syntax::EnumTypeSyntax*> enumTypes;
 

@@ -456,6 +456,43 @@ endmodule
 
     auto& bsize = compilation.getRoot().lookupName<ParameterSymbol>("b.new_adder.B_SIZE");
     CHECK(bsize.getValue().integer() == 66);
+
+    // The module instantiated with the bare value form is not also a top-level
+    // instance with default parameters (SVMake FRONT, D-061).
+    REQUIRE(compilation.getRoot().topInstances.size() == 1);
+    CHECK(compilation.getRoot().topInstances[0]->name == "b");
+}
+
+TEST_CASE("Bare value parameter assignment does not make the module a top") {
+    auto tree = SyntaxTree::fromText(R"(
+module t;
+    parameter PAR = 3;
+    m1 #PAR i1();
+    mreal #1.2 mr();
+endmodule
+
+module m1;
+    parameter P = 0;
+endmodule
+
+module mreal;
+    parameter real REAL = 99.99;
+endmodule
+)");
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowBareValParamAssignment;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    REQUIRE(compilation.getRoot().topInstances.size() == 1);
+    CHECK(compilation.getRoot().topInstances[0]->name == "t");
+
+    auto& p = compilation.getRoot().lookupName<ParameterSymbol>("t.i1.P");
+    CHECK(p.getValue().integer() == 3);
+    auto& r = compilation.getRoot().lookupName<ParameterSymbol>("t.mr.REAL");
+    CHECK(r.getValue().real() == 1.2);
 }
 
 TEST_CASE("v1800-2023: type parameter with type restriction errors") {

@@ -87,6 +87,22 @@ public:
         visitDefault(syntax);
     }
 
+    void handle(const PrimitiveInstantiationSyntax& syntax) {
+        std::string_view name = syntax.type.valueText();
+        if (!name.empty() && syntax.type.kind == TokenKind::Identifier) {
+            bool found = false;
+            for (auto& set : moduleDeclStack) {
+                if (set.find(name) != set.end()) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                meta.globalPrimitiveInstances.push_back(&syntax);
+        }
+        visitDefault(syntax);
+    }
+
     void handle(const GenerateBlockSyntax& syntax) {
         moduleDeclStack.emplace_back();
         visitDefault(syntax);
@@ -250,6 +266,11 @@ void ParserMetadata::visitReferencedSymbols(function_ref<void(Token)> func,
                 SLANG_UNREACHABLE;
         }
     }
+
+    // `name #value inst();` names a global definition as a hierarchy instantiation does
+    // (SVMake FRONT, D-061).
+    for (auto inst : globalPrimitiveInstances)
+        visit(inst->type);
 
     if (!includeInterfacePorts)
         return;
