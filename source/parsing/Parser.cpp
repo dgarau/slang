@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "slang/parsing/Parser.h"
+#include "slang/parsing/Preprocessor.h"
 
 #include "slang/diagnostics/ParserDiags.h"
 #include "slang/util/SmallMap.h"
@@ -68,6 +69,8 @@ ParserMetadata&& Parser::getMetadata() {
     if (meta.eofToken.kind != TokenKind::EndOfFile && peek(TokenKind::EndOfFile))
         meta.eofToken = consume();
 
+    meta.firstTimeScale = getPP().getFirstTimeScale();
+    meta.firstTimeScaleLoc = getPP().getFirstTimeScaleLocation();
     return std::move(meta);
 }
 

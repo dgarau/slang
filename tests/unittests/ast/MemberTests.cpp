@@ -2468,7 +2468,12 @@ alias;
     compilation.getAllDiagnostics();
 }
 
-TEST_CASE("A class or subroutine declared at the compilation unit takes the timescale directive in force where it began (SVMake IO-D1f-a3)") {
+// SVMake IO-D1f c1e (David Garau, 2026-10-08; reverses IO-D1f-a3's reading A). A compilation unit's own elements (its classes, functions and
+// tasks, a checker, and what `$unit` names) take the FIRST of the unit's `timeunit` declarations and `timescale directives, per half. PROVISIONAL
+// evidence: unit_directive_d5_r7 (directives 1ns, 1ps, 1us in order, a class and a task under each): Questa and Xcelium give every element the
+// FIRST directive's scale, VCS the LAST (2-1); unit_directive_d1d2_r7 (`timeunit` then a directive): Questa lets the directive win, Xcelium and VCS
+// take the `timeunit` declared first (2-1).
+TEST_CASE("A class or subroutine declared at the compilation unit takes the unit's FIRST timescale directive (SVMake c1e)") {
     auto tree = SyntaxTree::fromText(R"(
 class Before;
     function void f(); endfunction
@@ -2489,7 +2494,7 @@ typedef B#(int) bi_t;
 typedef B#(real) br_t;
 
 `timescale 1us / 1us
-// an out-of-block definition: the class's directive wins (the slang parent is the class); PROVISIONAL, no tool data
+// an out-of-block definition: the class's scale (the slang parent is the class)
 function void A::g(); endfunction
 
 `timescale 1ms / 1ms
@@ -2516,54 +2521,118 @@ endmodule
         return c.find<SubroutineSymbol>(name);
     };
 
-    // no directive in force at the declaration: nothing (not the later directive)
+    // declared before any directive: nothing of its own (R1), not the later directive
     CHECK(!cls("Before").getTimeScale());
     CHECK(!method(cls("Before"), "f").getTimeScale());
 
+    // everything after the first directive takes it, whatever directive is in force at the declaration
     CHECK(cls("A").getTimeScale() == ts("1ps/1ps"));
     CHECK(method(cls("A"), "f").getTimeScale() == ts("1ps/1ps"));
     CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1ps/1ps"));
-    CHECK(method(cls("A"), "g").getTimeScale() == ts("1ps/1ps"));   // not the 1us/1us at the definition
+    CHECK(method(cls("A"), "g").getTimeScale() == ts("1ps/1ps"));
+    CHECK(cls("Mid").getTimeScale() == ts("1ps/1ps"));
+    CHECK(method(cls("Mid"), "f").getTimeScale() == ts("1ps/1ps"));
 
-    // a generic class's specializations are parented outside the unit's member list: keyed on the declaration syntax
     auto& m = *compilation.getRoot().topInstances[0];
     auto& bi = m.body.find<VariableSymbol>("bi").getType().getCanonicalType().as<ClassType>();
     auto& br = m.body.find<VariableSymbol>("br").getType().getCanonicalType().as<ClassType>();
     CHECK(&bi != &br);
-    CHECK(bi.getTimeScale() == ts("1ns/1ps"));
-    CHECK(br.getTimeScale() == ts("1ns/1ps"));
-    CHECK(method(bi, "f").getTimeScale() == ts("1ns/1ps"));
-    CHECK(method(br, "f").getTimeScale() == ts("1ns/1ps"));
+    CHECK(bi.getTimeScale() == ts("1ps/1ps"));
+    CHECK(br.getTimeScale() == ts("1ps/1ps"));
+    CHECK(method(bi, "f").getTimeScale() == ts("1ps/1ps"));
 
-    // a directive INSIDE the class body does not change the class's: the header's wins
-    CHECK(cls("Mid").getTimeScale() == ts("1ms/1ms"));
-    CHECK(method(cls("Mid"), "f").getTimeScale() == ts("1ms/1ms"));
+    // what `$unit` names, asked of any caller
+    CHECK(compilation.getUnitTimeScale(unit) == ts("1ps/1ps"));
+    for (auto s : compilation.getAllMemberDirectiveTimeScales())
+        CHECK(s == ts("1ps/1ps"));
 }
 
-TEST_CASE("A compilation unit's own timeunit beats the directive for its classes (SVMake IO-D1f-a3)") {
-    auto tree = SyntaxTree::fromText(R"(
+TEST_CASE("The first of a unit's timeunit declaration and timescale directive wins per half (SVMake c1e)") {
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+
+    {
+        // a timeunit before the first directive wins
+        auto tree = SyntaxTree::fromText(R"(
 timeunit 10ns / 10ps;
 `timescale 1ps / 1ps
 class A;
 endclass
 )");
-
-    Compilation compilation;
-    compilation.addSyntaxTree(tree);
-    NO_COMPILATION_ERRORS;
-
-    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
-    CHECK(compilation.getCompilationUnits()[0]->find<ClassType>("A").getTimeScale() == ts("10ns/10ps"));
-    CHECK(compilation.getAllMemberDirectiveTimeScales().size() == 1);
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        NO_COMPILATION_ERRORS;
+        auto& unit = *compilation.getCompilationUnits()[0];
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("10ns/10ps"));
+        CHECK(compilation.getUnitTimeScale(unit) == ts("10ns/10ps"));
+    }
+    {
+        // L10: a directive, then a timeunit with no item between, then the class: the directive is first
+        auto tree = SyntaxTree::fromText(R"(
+`timescale 1ps / 1ps
+timeunit 10ns / 10ps;
+class A;
+endclass
+)");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        auto& unit = *compilation.getCompilationUnits()[0];
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1ps/1ps"));
+        CHECK(compilation.getUnitTimeScale(unit) == ts("1ps/1ps"));
+    }
+    {
+        // one half declared first: that half wins, the other is the directive's
+        auto tree = SyntaxTree::fromText(R"(
+timeprecision 1ps;
+`timescale 1us / 1ns
+class A;
+endclass
+`timescale 1ms / 1ms
+function void uf(); endfunction
+)");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        NO_COMPILATION_ERRORS;
+        auto& unit = *compilation.getCompilationUnits()[0];
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ps"));
+        CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1us/1ps"));
+    }
+    {
+        // the same half declared AFTER the first directive loses to it
+        auto tree = SyntaxTree::fromText(R"(
+`timescale 1us / 1ns
+timeprecision 1ps;
+class A;
+endclass
+)");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        auto& unit = *compilation.getCompilationUnits()[0];
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ns"));
+    }
+    {
+        // a unit with no members at all still names its scale (`$unit`); no directive and no declaration: nothing
+        auto tree = SyntaxTree::fromText(R"(
+`timescale 1ns / 1ps
+module m; endmodule
+)");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        NO_COMPILATION_ERRORS;
+        CHECK(compilation.getUnitTimeScale(*compilation.getCompilationUnits()[0]) == ts("1ns/1ps"));
+        auto tree2 = SyntaxTree::fromText("module m2; endmodule");
+        Compilation compilation2;
+        compilation2.addSyntaxTree(tree2);
+        CHECK(!compilation2.getUnitTimeScale(*compilation2.getCompilationUnits()[0]));
+    }
 }
 
-TEST_CASE("Only compilation-unit declarations count as unit members; a unit's declared half wins per half (SVMake IO-D1f-a3)") {
+TEST_CASE("Only compilation-unit declarations count as unit members; packages and modules keep their own scale (SVMake c1e)") {
     auto tree = SyntaxTree::fromText(R"(
-timeprecision 1ps;
-`timescale 1fs / 1fs
+`timescale 1ns / 1ns
 module unrelated;
     function void f(); endfunction
 endmodule
+`timescale 1ps / 1ps
 package pk;
     class PC; function void g(); endfunction endclass
 endpackage
@@ -2584,13 +2653,60 @@ function void uf(); endfunction
     auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
     auto& unit = *compilation.getCompilationUnits()[0];
 
-    // the module's function, the package's class and the out-of-block definition are not unit members: A (1us/1ns) and uf (1ms/1ms) are
+    // the module's function, the package's class and the out-of-block definition are not unit members: A and uf are, both with the FIRST directive
     auto all = compilation.getAllMemberDirectiveTimeScales();
     CHECK(all.size() == 2);
-    CHECK(std::count(all.begin(), all.end(), ts("1us/1ns")) == 1);
-    CHECK(std::count(all.begin(), all.end(), ts("1ms/1ms")) == 1);
+    CHECK(std::count(all.begin(), all.end(), ts("1ns/1ns")) == 2);
 
-    // only `timeprecision 1ps;` is declared: the unit half comes from the directive in force at the member, the precision half from the declaration
-    CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ps"));
-    CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1ms/1ps"));
+    // M8 control: a package keeps the directive in force at its own declaration
+    CHECK(compilation.getPackage("pk")->getTimeScale() == ts("1ps/1ps"));
+    CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1ns/1ns"));
+    CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1ns/1ns"));
+}
+
+TEST_CASE("A directive cleared by resetall leaves a later unit element with none; the first directive survives (SVMake c1e)") {
+    auto tree = SyntaxTree::fromText(R"(
+`timescale 1ps / 1ps
+class A; endclass
+`resetall
+class B; endclass
+`timescale 1ns / 1ns
+class C; endclass
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    auto& unit = *compilation.getCompilationUnits()[0];
+    CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1ps/1ps"));
+    CHECK(!unit.find<ClassType>("B").getTimeScale());   // no directive in force there
+    CHECK(unit.find<ClassType>("C").getTimeScale() == ts("1ps/1ps"));   // the FIRST directive, not the one in force
+    CHECK(compilation.getUnitTimeScale(unit) == ts("1ps/1ps"));
+}
+
+TEST_CASE("A checker declared at the compilation unit has the scale of its own declaration (SVMake c1e, H3)") {
+    auto tree = SyntaxTree::fromText(R"(
+checker bef(logic c); endchecker
+`timescale 1ps / 1ps
+checker ck(logic c); endchecker
+`timescale 1ns / 1ns
+checker later(logic c); endchecker
+module m(input logic c);
+    bef b(c);
+    ck k(c);
+    later l(c);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    auto& m = *compilation.getRoot().topInstances[0];
+    auto body = [&](std::string_view name) -> const Scope& {
+        return m.body.find<CheckerInstanceSymbol>(name).body;
+    };
+    CHECK(!body("b").getTimeScale());                        // declared before any directive
+    CHECK(body("k").getTimeScale() == ts("1ps/1ps"));        // the first directive, not the instantiator's 1ns/1ns
+    CHECK(body("l").getTimeScale() == ts("1ps/1ps"));        // declared under a later directive: the unit's FIRST
+    CHECK(m.body.getTimeScale() == ts("1ns/1ns"));
 }

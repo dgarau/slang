@@ -859,7 +859,7 @@ FunctionDeclarationSyntax& Parser::parseFunctionDeclaration(AttrList attributes,
     auto& declaration = factory.functionDeclaration(functionKind, attributes, prototype, semi, items,
                                                     end, endBlockName);
     if (directiveTimeScale)
-        meta.memberTimeScales.emplace_back(&declaration, *directiveTimeScale);
+        meta.memberTimeScales.emplace_back(&declaration, *getPP().getFirstTimeScale());   // c1e: the unit's FIRST directive
     return declaration;
 }
 
@@ -1220,7 +1220,7 @@ ClassDeclarationSyntax& Parser::parseClassDeclaration(AttrList attributes,
                                             endBlockName);
     meta.classDecls.push_back(&result);
     if (directiveTimeScale)
-        meta.memberTimeScales.emplace_back(&result, *directiveTimeScale);
+        meta.memberTimeScales.emplace_back(&result, *getPP().getFirstTimeScale());   // c1e: the unit's FIRST directive
     return result;
 }
 
@@ -2656,6 +2656,7 @@ SequenceDeclarationSyntax& Parser::parseSequenceDeclaration(AttrList attributes)
 }
 
 CheckerDeclarationSyntax& Parser::parseCheckerDeclaration(AttrList attributes) {
+    const auto directiveTimeScale = getPP().getTimeScale();   // SVMake c1e: as for a class declaration
     auto keyword = consume();
     auto name = expect(TokenKind::Identifier);
     auto portList = parseAssertionItemPortList(SyntaxKind::CheckerDeclaration);
@@ -2676,8 +2677,11 @@ CheckerDeclarationSyntax& Parser::parseCheckerDeclaration(AttrList attributes) {
     auto blockName = parseNamedBlockClause();
     checkBlockNames(name, blockName);
 
-    return factory.checkerDeclaration(attributes, keyword, name, portList, semi, members, end,
-                                      blockName);
+    auto& result = factory.checkerDeclaration(attributes, keyword, name, portList, semi, members,
+                                              end, blockName);
+    if (directiveTimeScale)
+        meta.memberTimeScales.emplace_back(&result, *getPP().getFirstTimeScale());
+    return result;
 }
 
 Token Parser::parseEdgeKeyword() {
