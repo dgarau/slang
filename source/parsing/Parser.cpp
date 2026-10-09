@@ -70,7 +70,6 @@ ParserMetadata&& Parser::getMetadata() {
         meta.eofToken = consume();
 
     meta.firstTimeScale = getPP().getFirstTimeScale();
-    meta.firstTimeScaleLoc = getPP().getFirstTimeScaleLocation();
     return std::move(meta);
 }
 

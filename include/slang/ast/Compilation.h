@@ -725,9 +725,9 @@ public:
     std::vector<TimeScale> getAllMemberDirectiveTimeScales() const;
 
     /// SVMake IO-D1f c1e (David Garau, 2026-10-08): the time scale of a compilation unit's OWN elements
-    /// (what `$unit` names, and what its classes, subroutines and checkers use): per half, the FIRST of
-    /// the unit's `timeunit` / `timeprecision` declaration and its first `timescale directive in the source
-    /// text. Empty when the unit has neither.
+    /// (what `$unit` names, and what its classes, functions and tasks use): per half, the unit's `timeunit` /
+    /// `timeprecision` declaration (3.14.2.3: only a declaration sets a compilation unit's own scale), and
+    /// otherwise its FIRST `timescale directive. Empty when the unit has neither.
     std::optional<TimeScale> getUnitTimeScale(const CompilationUnitSymbol& unit) const;
 
     /// Gets the next system ID to use for identifying enum types.
@@ -990,7 +990,7 @@ private:
 
     // SVMake IO-D1f-a3: the `timescale directive in force where a class, function or task declaration began.
     flat_hash_map<const syntax::SyntaxNode*, TimeScale> memberTimeScales;
-    flat_hash_map<const syntax::SyntaxNode*, std::pair<TimeScale, SourceLocation>> unitFirstTimeScales;
+    flat_hash_map<const syntax::SyntaxNode*, TimeScale> unitFirstTimeScales;
 
     // A list of all created definitions, as storage for their memory.
     std::vector<std::unique_ptr<DefinitionSymbol>> definitionMemory;

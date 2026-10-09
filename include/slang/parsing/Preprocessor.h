@@ -148,10 +148,9 @@ public:
     const std::optional<TimeScale>& getTimeScale() const { return activeTimeScale; }
 
     /// SVMake IO-D1f c1e: the FIRST `timescale directive this preprocessor processed (never cleared by
-    /// `resetall), and where it was written. David Garau, 2026-10-08: the first of a compilation unit's
-    /// `timeunit declarations / `timescale directives sets the scale of the unit's own elements.
+    /// `resetall). David Garau, 2026-10-08: a compilation unit's own elements take its `timeunit declaration
+    /// and otherwise the FIRST `timescale directive.
     const std::optional<TimeScale>& getFirstTimeScale() const { return firstTimeScale; }
-    SourceLocation getFirstTimeScaleLocation() const { return firstTimeScaleLoc; }
 
     /// Gets the default net type to use if none is specified. This is set via
     /// the @code `default_nettype @endcode directive. If it is set to "none" by the user,
@@ -555,7 +554,6 @@ private:
     std::vector<KeywordVersionState> keywordVersionStack;
     std::optional<TimeScale> activeTimeScale;
     std::optional<TimeScale> firstTimeScale;
-    SourceLocation firstTimeScaleLoc;
     TokenKind defaultNetType = TokenKind::WireKeyword;
     TokenKind unconnectedDrive = TokenKind::Unknown;
     TokenKind expectedEndKind = TokenKind::Unknown;

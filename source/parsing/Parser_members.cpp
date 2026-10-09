@@ -2679,8 +2679,9 @@ CheckerDeclarationSyntax& Parser::parseCheckerDeclaration(AttrList attributes) {
 
     auto& result = factory.checkerDeclaration(attributes, keyword, name, portList, semi, members,
                                               end, blockName);
+    // A checker is a design element: it keeps the directive IN FORCE at its declaration (3.2, 22.7), not the unit's first.
     if (directiveTimeScale)
-        meta.memberTimeScales.emplace_back(&result, *getPP().getFirstTimeScale());
+        meta.memberTimeScales.emplace_back(&result, *directiveTimeScale);
     return result;
 }
 

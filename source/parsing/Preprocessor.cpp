@@ -1102,10 +1102,8 @@ Trivia Preprocessor::handleTimeScaleDirective(Token directive) {
         }
         else {
             activeTimeScale = {unit, precision};
-            if (!firstTimeScale) {
+            if (!firstTimeScale)
                 firstTimeScale = activeTimeScale;
-                firstTimeScaleLoc = directive.location();
-            }
         }
     }
 

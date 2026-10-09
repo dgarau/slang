@@ -58,31 +58,21 @@ std::vector<TimeScale> Compilation::getAllMemberDirectiveTimeScales() const {
 std::optional<TimeScale> Compilation::getUnitTimeScale(const CompilationUnitSymbol& unit) const {
     const auto& declared = unit.timeScale;
     auto syntax = unit.getSyntax();
-    if (!syntax)
-        return declared;
-    auto it = unitFirstTimeScales.find(syntax);
+    auto it = syntax ? unitFirstTimeScales.find(syntax) : unitFirstTimeScales.end();
     if (it == unitFirstTimeScales.end())
         return declared;
-    const TimeScale& first = it->second.first;
-    const SourceLocation firstLoc = it->second.second;
+    const TimeScale& first = it->second;
     if (!declared)
         return first;
 
-    // A half the unit declares by timeunit / timeprecision wins when the declaration comes BEFORE the first
-    // directive in the source text (Xcelium and VCS; Questa lets the directive win: 2-1, PROVISIONAL); a half
-    // it does not declare, or declares after the directive, is the directive's.
-    auto declaredFirst = [&](const std::optional<SourceRange>& range) {
-        if (!range)
-            return false;
-        auto start = range->start();
-        if (start.buffer() != firstLoc.buffer())
-            return true;
-        return start.offset() < firstLoc.offset();
-    };
+    // 3.14.2.3: "the time unit of the compilation-unit scope can only be set by a timeunit declaration, not a
+    // `timescale directive". Each half the unit declares wins (wherever it is written: Xcelium and VCS take a
+    // timeunit declared first; Questa lets a directive win, 2-1, PROVISIONAL); a half it does not declare is the
+    // first directive's.
     TimeScale merged = first;
-    if (declaredFirst(unit.getUnitsRange()))
+    if (unit.declaresTimeUnit())
         merged.base = declared->base;
-    if (declaredFirst(unit.getPrecisionRange()))
+    if (unit.declaresTimePrecision())
         merged.precision = declared->precision;
     return merged;
 }
@@ -252,8 +242,7 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
     for (auto& [n, scale] : tree->getMetadata().memberTimeScales)
         memberTimeScales.emplace(n, scale);
     if (tree->getMetadata().firstTimeScale)
-        unitFirstTimeScales.emplace(topNode, std::make_pair(*tree->getMetadata().firstTimeScale,
-                                                            tree->getMetadata().firstTimeScaleLoc));
+        unitFirstTimeScales.emplace(topNode, *tree->getMetadata().firstTimeScale);
 
     for (auto& [n, meta] : tree->getMetadata().nodeMeta) {
         SyntaxMetadata result;

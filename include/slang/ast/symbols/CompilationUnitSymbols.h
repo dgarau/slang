@@ -40,8 +40,6 @@ public:
     /// SVMake IO-D1f-a3: which halves of the unit's time scale a `timeunit` / `timeprecision` declaration set.
     bool declaresTimeUnit() const { return unitsRange.has_value(); }
     bool declaresTimePrecision() const { return precisionRange.has_value(); }
-    const std::optional<SourceRange>& getUnitsRange() const { return unitsRange; }
-    const std::optional<SourceRange>& getPrecisionRange() const { return precisionRange; }
 
 private:
     // Used for tracking whether a time scale directive is first in scope.

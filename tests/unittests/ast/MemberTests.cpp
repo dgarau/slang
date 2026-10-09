@@ -2469,10 +2469,11 @@ alias;
 }
 
 // SVMake IO-D1f c1e (David Garau, 2026-10-08; reverses IO-D1f-a3's reading A). A compilation unit's own elements (its classes, functions and
-// tasks, a checker, and what `$unit` names) take the FIRST of the unit's `timeunit` declarations and `timescale directives, per half. PROVISIONAL
-// evidence: unit_directive_d5_r7 (directives 1ns, 1ps, 1us in order, a class and a task under each): Questa and Xcelium give every element the
-// FIRST directive's scale, VCS the LAST (2-1); unit_directive_d1d2_r7 (`timeunit` then a directive): Questa lets the directive win, Xcelium and VCS
-// take the `timeunit` declared first (2-1).
+// tasks, and what `$unit` names) take the unit's `timeunit` / `timeprecision` declaration per half (3.14.2.3: only a declaration sets a unit's own
+// scale) and otherwise its FIRST `timescale directive. PROVISIONAL evidence: unit_directive_d5_r7 (directives 1ns, 1ps, 1us in order, a class and a
+// task under each): Questa and Xcelium give every element the FIRST directive's scale, VCS the LAST (2-1); unit_directive_d1d2_r7 (`timeunit` then a
+// directive): Questa lets the directive win, Xcelium and VCS take the `timeunit` (2-1). A `timeunit` written AFTER the first directive was not probed.
+// A checker is a design element: it keeps the directive in force at its own declaration (3.2, 22.7; no tool evidence either way).
 TEST_CASE("A class or subroutine declared at the compilation unit takes the unit's FIRST timescale directive (SVMake c1e)") {
     auto tree = SyntaxTree::fromText(R"(
 class Before;
@@ -2547,7 +2548,7 @@ endmodule
         CHECK(s == ts("1ps/1ps"));
 }
 
-TEST_CASE("The first of a unit's timeunit declaration and timescale directive wins per half (SVMake c1e)") {
+TEST_CASE("A unit's timeunit declaration wins per half over its first timescale directive (SVMake c1e)") {
     auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
 
     {
@@ -2566,7 +2567,8 @@ endclass
         CHECK(compilation.getUnitTimeScale(unit) == ts("10ns/10ps"));
     }
     {
-        // L10: a directive, then a timeunit with no item between, then the class: the directive is first
+        // L10: a directive, then a timeunit with no item between, then the class: the declaration still sets the unit's own scale (3.14.2.3);
+        // PROVISIONAL, no tool probed this order
         auto tree = SyntaxTree::fromText(R"(
 `timescale 1ps / 1ps
 timeunit 10ns / 10ps;
@@ -2576,8 +2578,8 @@ endclass
         Compilation compilation;
         compilation.addSyntaxTree(tree);
         auto& unit = *compilation.getCompilationUnits()[0];
-        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1ps/1ps"));
-        CHECK(compilation.getUnitTimeScale(unit) == ts("1ps/1ps"));
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("10ns/10ps"));
+        CHECK(compilation.getUnitTimeScale(unit) == ts("10ns/10ps"));
     }
     {
         // one half declared first: that half wins, the other is the directive's
@@ -2597,7 +2599,7 @@ function void uf(); endfunction
         CHECK(unit.find<SubroutineSymbol>("uf").getTimeScale() == ts("1us/1ps"));
     }
     {
-        // the same half declared AFTER the first directive loses to it
+        // the same half declared AFTER the first directive still wins its half
         auto tree = SyntaxTree::fromText(R"(
 `timescale 1us / 1ns
 timeprecision 1ps;
@@ -2607,7 +2609,7 @@ endclass
         Compilation compilation;
         compilation.addSyntaxTree(tree);
         auto& unit = *compilation.getCompilationUnits()[0];
-        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ns"));
+        CHECK(unit.find<ClassType>("A").getTimeScale() == ts("1us/1ps"));
     }
     {
         // a unit with no members at all still names its scale (`$unit`); no directive and no declaration: nothing
@@ -2684,7 +2686,7 @@ class C; endclass
     CHECK(compilation.getUnitTimeScale(unit) == ts("1ps/1ps"));
 }
 
-TEST_CASE("A checker declared at the compilation unit has the scale of its own declaration (SVMake c1e, H3)") {
+TEST_CASE("A checker declared at the compilation unit has the directive in force at its own declaration (SVMake c1e, H3)") {
     auto tree = SyntaxTree::fromText(R"(
 checker bef(logic c); endchecker
 `timescale 1ps / 1ps
@@ -2706,7 +2708,7 @@ endmodule
         return m.body.find<CheckerInstanceSymbol>(name).body;
     };
     CHECK(!body("b").getTimeScale());                        // declared before any directive
-    CHECK(body("k").getTimeScale() == ts("1ps/1ps"));        // the first directive, not the instantiator's 1ns/1ns
-    CHECK(body("l").getTimeScale() == ts("1ps/1ps"));        // declared under a later directive: the unit's FIRST
+    CHECK(body("k").getTimeScale() == ts("1ps/1ps"));        // the directive in force there, not the instantiator's 1ns/1ns
+    CHECK(body("l").getTimeScale() == ts("1ns/1ns"));        // declared under a later directive: THAT directive, not the unit's first
     CHECK(m.body.getTimeScale() == ts("1ns/1ns"));
 }
