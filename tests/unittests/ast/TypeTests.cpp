@@ -2978,3 +2978,47 @@ endmodule
     auto& elem2 = elem.getCanonicalType().as<PackedArrayType>().elementType;
     CHECK(elem2.isSigned());
 }
+
+TEST_CASE("Selects of a packed array declared signed are unsigned, through a typedef too") {
+    // [7.4.1]: "The individual elements of the array are unsigned unless they are of a named
+    // type declared as signed. A part-select of a packed array shall be unsigned."
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef logic signed [2:0] named_t;
+    typedef logic signed [1:0][2:0] named_unnamed_t;
+    typedef named_t [1:0] named_named_t;
+
+    named_t v;                                // signed vector through a typedef
+    named_unnamed_t [1:0] outer;              // elements named_unnamed_t: signed
+    named_unnamed_t u;                        // signed array, elements anonymous: unsigned
+    logic signed [1:0][1:0][2:0] anon;
+    named_named_t nn;                         // unsigned array of signed named elements
+
+    var type(v[1]) t_vbit;
+    var type(outer[1]) t_outer_elem;
+    var type(u[1]) t_u_elem;
+    var type(u[1:0]) t_u_slice;
+    var type(anon[1]) t_anon_elem;
+    var type(anon[1][1]) t_anon_inner;
+    var type(nn[1]) t_nn_elem;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto signedOf = [&](std::string_view name) {
+        return compilation.getRoot()
+            .lookupName<VariableSymbol>("m." + std::string(name))
+            .getType()
+            .isSigned();
+    };
+    CHECK(!signedOf("t_vbit"));
+    CHECK(signedOf("t_outer_elem"));
+    CHECK(!signedOf("t_u_elem"));
+    CHECK(!signedOf("t_u_slice"));
+    CHECK(!signedOf("t_anon_elem"));
+    CHECK(!signedOf("t_anon_inner"));
+    CHECK(signedOf("t_nn_elem"));
+}
