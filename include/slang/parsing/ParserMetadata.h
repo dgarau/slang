@@ -41,10 +41,10 @@ struct SLANG_EXPORT ParserMetadata {
     /// Keyed on the declaration SYNTAX, so a generic class's specializations find it too.
     std::vector<std::pair<const syntax::SyntaxNode*, TimeScale>> memberTimeScales;
 
-    /// SVMake IO-D1f c1e: the FIRST `timescale directive of the compilation unit and where it was
-    /// written (empty when the unit has none). Every entry of memberTimeScales carries this value.
+    /// SVMake IO-D1f c1e: the FIRST `timescale directive of the compilation unit (empty when the unit has
+    /// none). A class, function or task entry of memberTimeScales carries this value; a checker's entry
+    /// carries the directive in force at its declaration.
     std::optional<TimeScale> firstTimeScale;
-    SourceLocation firstTimeScaleLoc;
 
     /// Potential dependency references: hierarchy and checker instantiations, identifier names
     /// preceding a double colon, package import declarations, and virtual interface types.

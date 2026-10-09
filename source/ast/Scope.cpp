@@ -102,6 +102,9 @@ std::optional<TimeScale> Scope::getTimeScale() const {
                 auto directive = getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
                 if (!directive)
                     return declared;
+                // A checker is a design element: the directive in force at its declaration (3.2, 22.7).
+                if (unitMember->kind == SymbolKind::Checker)
+                    return directive;
                 return getCompilation().getUnitTimeScale(unit);
             }
             case SymbolKind::Package:
