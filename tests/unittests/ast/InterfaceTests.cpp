@@ -297,6 +297,47 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("Modport exports are not forgotten by a later modport without exports") {
+    // [25.7.2], [25.7.3]: a subroutine exported by one modport and imported by another, with
+    // the importing modport declared last, and the task defined in a module by its port name.
+    auto tree = SyntaxTree::fromText(R"(
+interface bus_if;
+    logic [7:0] data;
+    logic [7:0] result;
+    modport provider(output data, output result,
+                     export task send(input logic [7:0] val),
+                     export task accumulate(input logic [7:0] a, input logic [7:0] b));
+    modport consumer(input data, input result,
+                     import task send(input logic [7:0] val),
+                     import task accumulate(input logic [7:0] a, input logic [7:0] b));
+endinterface
+
+module driver(bus_if.provider port);
+    task port.send(input logic [7:0] val);
+        port.data = val;
+        port.result = val + 8'h01;
+    endtask
+    task port.accumulate(input logic [7:0] a, input logic [7:0] b);
+        port.data = a;
+        port.result = a + b;
+    endtask
+endmodule
+
+module t;
+    bus_if bif();
+    driver drv(.port(bif.provider));
+    initial begin
+        bif.consumer.send(8'hAB);
+        bif.consumer.accumulate(8'h10, 8'h20);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("modport direction checking") {
     auto tree = SyntaxTree::fromText(R"(
 interface I;

@@ -310,7 +310,9 @@ void Scope::addMembers(const SyntaxNode& syntax) {
             break;
         case SyntaxKind::ModportDeclaration:
             addDeferredMembers(syntax);
-            hasModportExports = declaresModportExports(syntax.as<ModportDeclarationSyntax>());
+            // A later modport that exports nothing must not forget an earlier one that does
+            // (SVMake FRONT-f, [25.7.2]).
+            hasModportExports |= declaresModportExports(syntax.as<ModportDeclarationSyntax>());
             break;
         case SyntaxKind::FunctionDeclaration:
         case SyntaxKind::TaskDeclaration: {
