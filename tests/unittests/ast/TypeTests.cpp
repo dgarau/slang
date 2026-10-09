@@ -2927,3 +2927,54 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ExpectedNetDelay);
 }
+
+TEST_CASE("Packed array of a named signed type is not signed as a whole") {
+    // [7.4.1]: a packed array is signed only if it is declared signed; its elements are
+    // signed if they are of a named type declared as signed.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef logic signed [2:0] named_t;
+    typedef named_t [1:0] named_named_t;
+    typedef logic signed [1:0][2:0] named_unnamed_t;
+    typedef enum logic signed [2:0] { A = 0, B = 1 } enum_t;
+    typedef struct packed signed { logic [2:0] f; } struct_t;
+
+    named_named_t [1:0] named_named;
+    named_t [1:0][1:0] named_2d;
+    named_unnamed_t [1:0] named_unnamed;
+    logic signed [1:0][1:0][2:0] unnamed;
+    logic signed [3:0] plain_vec;
+    enum_t [1:0] enum_arr;
+    struct_t [1:0] struct_arr;
+    bit signed [1:0][1:0] bits_signed;
+    named_t single;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto signedOf = [&](std::string_view name) {
+        return compilation.getRoot()
+            .lookupName<VariableSymbol>("m." + std::string(name))
+            .getType()
+            .isSigned();
+    };
+    CHECK(!signedOf("named_named"));
+    CHECK(!signedOf("named_2d"));
+    CHECK(!signedOf("named_unnamed"));
+    CHECK(signedOf("unnamed"));
+    CHECK(signedOf("plain_vec"));
+    CHECK(!signedOf("enum_arr"));
+    CHECK(!signedOf("struct_arr"));
+    CHECK(signedOf("bits_signed"));
+    CHECK(signedOf("single"));
+
+    // The elements of the arrays are still signed where their named type is.
+    auto& named2d = compilation.getRoot().lookupName<VariableSymbol>("m.named_2d");
+    auto& elem = named2d.getType().getCanonicalType().as<PackedArrayType>().elementType;
+    CHECK(!elem.isSigned());
+    auto& elem2 = elem.getCanonicalType().as<PackedArrayType>().elementType;
+    CHECK(elem2.isSigned());
+}

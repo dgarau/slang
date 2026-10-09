@@ -679,10 +679,22 @@ void EnumValueSymbol::serializeTo(ASTSerializer& serializer) const {
     serializer.write("value", getValue());
 }
 
+// [7.4.1] "If a packed array is declared as signed, then the array viewed as a single vector
+// shall be signed. The individual elements of the array are unsigned unless they are of a named
+// type declared as signed." The signing keyword of `logic signed [1:0][2:0]` reaches the scalar
+// at the bottom of the dimension chain, so an array whose element is that scalar (or another
+// array of the chain) is signed as a whole. An element that is a NAMED type (a typedef, enum or
+// packed struct) is signed on its own, and does not make an array of it signed.
+static bool packedArrayIsSigned(const Type& elementType) {
+    return (elementType.kind == SymbolKind::ScalarType ||
+            elementType.kind == SymbolKind::PackedArrayType) &&
+           elementType.isSigned();
+}
+
 PackedArrayType::PackedArrayType(const Type& elementType, ConstantRange range,
                                  bitwidth_t fullWidth) :
     IntegralType(SymbolKind::PackedArrayType, "", SourceLocation(), fullWidth,
-                 elementType.isSigned(), elementType.isFourState()),
+                 packedArrayIsSigned(elementType), elementType.isFourState()),
     elementType(elementType), range(range) {
 }
 
