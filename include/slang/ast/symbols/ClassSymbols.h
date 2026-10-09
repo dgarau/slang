@@ -209,6 +209,12 @@ private:
     mutable std::optional<bool> cachedHasCycles;
     mutable uint32_t specializationDepth = 0;
     mutable bool resolvingBaseClass = false;
+
+
+    // The specialization of a class in whose scope this specialization was requested, if any.
+    // Chains of these detect specializations of mutually recursive generic classes that never
+    // reach a fixed point (SVMake FRONT, D-063).
+    mutable const ClassType* specializationRequester = nullptr;
     SymbolIndex headerIndex;
 };
 
