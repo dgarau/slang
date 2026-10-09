@@ -2213,8 +2213,13 @@ void Lookup::unqualifiedImpl(const Scope& scope, std::string_view name, LookupLo
         outOfBlockIndex = sym.as<ConstraintBlockSymbol>().getOutOfBlockIndex();
     }
     else if (uint32_t(outOfBlockIndex) != 0) {
-        location = LookupLocation(location.getScope(), uint32_t(outOfBlockIndex));
-        outOfBlockIndex = SymbolIndex(0);
+        // The out-of-block location is in the scope that holds the definition. For a method of
+        // a nested class that is the scope outside of the outermost class, so keep it pending
+        // while the enclosing scope is itself a class.
+        if (location.getScope()->asSymbol().kind != SymbolKind::ClassType) {
+            location = LookupLocation(location.getScope(), uint32_t(outOfBlockIndex));
+            outOfBlockIndex = SymbolIndex(0);
+        }
     }
 
     if (sym.kind == SymbolKind::ClassType) {

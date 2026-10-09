@@ -618,6 +618,12 @@ public:
     std::tuple<const syntax::SyntaxNode*, SymbolIndex, bool*> findOutOfBlockDecl(
         const Scope& scope, std::string_view className, std::string_view declName) const;
 
+    /// Searches for the out-of-block declaration named @a declName of the class
+    /// @a classSymbol. A nested class's declarations are located in the scope that
+    /// contains the outermost class and name the whole path (`Outer::Inner::decl`).
+    std::tuple<const syntax::SyntaxNode*, SymbolIndex, bool*> findOutOfBlockDecl(
+        const Symbol& classSymbol, std::string_view declName) const;
+
     /// Tracks the existence of an extern interface method implementation. These are later
     /// elaborated by the compilation to hook up connections to their interface prototypes.
     void addExternInterfaceMethod(const SubroutineSymbol& method);

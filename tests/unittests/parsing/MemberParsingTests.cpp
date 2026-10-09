@@ -479,20 +479,20 @@ endclass
 function new();
 endfunction
 
+// A nested class's method (C::D::baz) is a valid out-of-block definition (A.1.9 class_scope).
 function C::D::baz();
 endfunction
 )";
 
     parseCompilationUnit(text);
 
-    REQUIRE(diagnostics.size() == 7);
+    REQUIRE(diagnostics.size() == 6);
     CHECK(diagnostics[0].code == diag::TaskReturnType);
     CHECK(diagnostics[1].code == diag::ExpectedSubroutineName);
     CHECK(diagnostics[2].code == diag::TaskConstructor);
     CHECK(diagnostics[3].code == diag::ConstructorReturnType);
     CHECK(diagnostics[4].code == diag::NewKeywordQualified);
     CHECK(diagnostics[5].code == diag::ConstructorOutsideClass);
-    CHECK(diagnostics[6].code == diag::ExpectedSubroutineName);
 }
 
 TEST_CASE("super.new parsing") {

@@ -724,7 +724,20 @@ static bool checkSubroutineName(const NameSyntax& name) {
 
     if (name.kind == SyntaxKind::ScopedName) {
         auto& scoped = name.as<ScopedNameSyntax>();
-        return checkKind(*scoped.left) && checkKind(*scoped.right);
+
+        // [A.1.9] class_scope ::= class_type ::, and a class_type is a path of classes
+        // (`Outer::Inner`), so the class part of an out-of-block definition may itself be scoped.
+        const NameSyntax* left = scoped.left;
+        while (left->kind == SyntaxKind::ScopedName) {
+            auto& inner = left->as<ScopedNameSyntax>();
+            if (inner.separator.kind != TokenKind::DoubleColon ||
+                inner.right->kind != SyntaxKind::IdentifierName) {
+                return false;
+            }
+            left = inner.left;
+        }
+
+        return checkKind(*left) && checkKind(*scoped.right);
     }
 
     return checkKind(name);
@@ -2167,7 +2180,18 @@ static bool checkConstraintName(const NameSyntax& name) {
         if (scoped.separator.kind == TokenKind::Dot)
             return false;
 
-        return scoped.left->kind == SyntaxKind::IdentifierName &&
+        // The class part may be a path of nested classes (A.1.9 class_scope).
+        const NameSyntax* left = scoped.left;
+        while (left->kind == SyntaxKind::ScopedName) {
+            auto& inner = left->as<ScopedNameSyntax>();
+            if (inner.separator.kind != TokenKind::DoubleColon ||
+                inner.right->kind != SyntaxKind::IdentifierName) {
+                return false;
+            }
+            left = inner.left;
+        }
+
+        return left->kind == SyntaxKind::IdentifierName &&
                scoped.right->kind == SyntaxKind::IdentifierName;
     }
 

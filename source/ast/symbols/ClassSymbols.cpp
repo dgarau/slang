@@ -1374,7 +1374,7 @@ const Constraint& ConstraintBlockSymbol::getConstraints() const {
         auto& outerScope = *parentSym.getParentScope();
         auto& comp = outerScope.getCompilation();
 
-        auto [declSyntax, index, used] = comp.findOutOfBlockDecl(outerScope, parentSym.name, name);
+        auto [declSyntax, index, used] = comp.findOutOfBlockDecl(parentSym, name);
         if (!declSyntax || declSyntax->kind != SyntaxKind::ConstraintDeclaration || name.empty()) {
             if (!flags.has(ConstraintBlockFlags::Pure) && !name.empty()) {
                 DiagCode code = flags.has(ConstraintBlockFlags::ExplicitExtern)
@@ -1398,7 +1398,16 @@ const Constraint& ConstraintBlockSymbol::getConstraints() const {
 
         // The method definition must be located after the class definition.
         outOfBlockIndex = index;
-        if (index <= parentSym.getIndex()) {
+
+        // For a nested class the comparison is against the outermost class, which is what
+        // lives in the scope of the definition.
+        const Symbol* outermostClass = &parentSym;
+        while (outermostClass->getParentScope() &&
+               outermostClass->getParentScope()->asSymbol().kind == SymbolKind::ClassType) {
+            outermostClass = &outermostClass->getParentScope()->asSymbol();
+        }
+
+        if (index <= outermostClass->getIndex()) {
             auto& diag = outerScope.addDiag(diag::MemberDefinitionBeforeClass,
                                             cds.name->getLastToken().location());
             diag << name << parentSym.name;

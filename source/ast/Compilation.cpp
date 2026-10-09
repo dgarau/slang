@@ -1204,6 +1204,38 @@ void Compilation::addOutOfBlockDecl(const Scope& scope, const ScopedNameSyntax& 
 
     std::string_view className = name.left->getLastToken().valueText();
     std::string_view declName = name.right->getLastToken().valueText();
+
+    // [8.24], A.1.9: the class_scope of an out-of-block declaration is a class_type, which
+    // may name a nested class (`Outer::Inner::method`). Such a declaration is keyed by the
+    // whole path of the class, joined with "::", so that it is found from the nested class
+    // and so that nested classes of the same name in different outer classes stay distinct.
+    if (name.left->kind == SyntaxKind::ScopedName) {
+        std::string path;
+        bool simple = true;
+        std::function<void(const NameSyntax&)> collect = [&](const NameSyntax& n) {
+            if (n.kind == SyntaxKind::IdentifierName) {
+                if (!path.empty())
+                    path += "::";
+                path += n.as<IdentifierNameSyntax>().identifier.valueText();
+            }
+            else if (n.kind == SyntaxKind::ScopedName &&
+                     n.as<ScopedNameSyntax>().separator.kind == TokenKind::DoubleColon) {
+                collect(*n.as<ScopedNameSyntax>().left);
+                collect(*n.as<ScopedNameSyntax>().right);
+            }
+            else {
+                simple = false;
+            }
+        };
+        collect(*name.left);
+
+        if (simple && !path.empty()) {
+            auto mem = (char*)allocate(path.size(), 1);
+            memcpy(mem, path.data(), path.size());
+            className = std::string_view(mem, path.size());
+        }
+    }
+
     auto [it, inserted] = outOfBlockDecls.emplace(std::make_tuple(className, declName, &scope),
                                                   std::make_tuple(&syntax, &name, index, false));
 
@@ -1227,6 +1259,33 @@ std::tuple<const SyntaxNode*, SymbolIndex, bool*> Compilation::findOutOfBlockDec
     }
 
     return {nullptr, SymbolIndex(), nullptr};
+}
+
+std::tuple<const SyntaxNode*, SymbolIndex, bool*> Compilation::findOutOfBlockDecl(
+    const Symbol& classSymbol, std::string_view declName) const {
+
+    // The definition of a nested class's method is located in the scope that contains the
+    // outermost class, and names the whole path of classes: `Outer::Inner::method`.
+    std::string path(classSymbol.name);
+    auto scope = classSymbol.getParentScope();
+    while (scope && scope->asSymbol().kind == SymbolKind::ClassType) {
+        path = std::string(scope->asSymbol().name) + "::" + path;
+        scope = scope->asSymbol().getParentScope();
+    }
+
+    if (!scope)
+        return {nullptr, SymbolIndex(), nullptr};
+
+    auto result = findOutOfBlockDecl(*scope, path, declName);
+    if (std::get<0>(result))
+        return result;
+
+    // A definition inside a package may qualify the class with the package's name.
+    auto& scopeSym = scope->asSymbol();
+    if (scopeSym.kind == SymbolKind::Package && !scopeSym.name.empty())
+        return findOutOfBlockDecl(*scope, std::string(scopeSym.name) + "::" + path, declName);
+
+    return result;
 }
 
 void Compilation::addExternInterfaceMethod(const SubroutineSymbol& method) {
@@ -1616,7 +1675,14 @@ void Compilation::elaborate() {
         for (auto& [key, val] : decls) {
             auto& [syntax, name, index, used] = val;
             if (!used) {
-                auto& [className, declName, scope] = key;
+                auto& [fullClassName, declName, scope] = key;
+
+                // A nested class's declaration is keyed by its whole path; the last
+                // component is the name to report on.
+                std::string_view className = fullClassName;
+                if (auto pos = className.rfind("::"); pos != std::string_view::npos)
+                    className = className.substr(pos + 2);
+
                 auto classRange = name->left->sourceRange();
                 auto sym = Lookup::unqualifiedAt(*scope, className,
                                                  LookupLocation(scope, uint32_t(index)),

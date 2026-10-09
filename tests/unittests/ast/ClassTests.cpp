@@ -4408,6 +4408,99 @@ endmodule
     CHECK(diags[0].code == diag::NotAGenericClass);
 }
 
+TEST_CASE("Out-of-block definitions of methods and constraints of a nested class") {
+    // [8.24], A.1.9: class_scope ::= class_type ::, and a class_type may name a nested class.
+    auto tree = SyntaxTree::fromText(R"(
+class Cls;
+    int value;
+    extern function int f(int in);
+    class SubCls;
+        int value;
+        rand int r;
+        extern function int f(int in);
+        extern static function int get_10();
+        extern task t(int in);
+        extern constraint c;
+    endclass
+endclass
+
+class Other;
+    class SubCls;
+        extern function int f(int in);
+    endclass
+endclass
+
+localparam int K = 3;
+
+function int Cls::f(int in);
+    return in + 1;
+endfunction
+
+function int Cls::SubCls::f(int in);
+    return in + 10 + K;
+endfunction
+
+function int Cls::SubCls::get_10();
+    return 10;
+endfunction
+
+task Cls::SubCls::t(int in);
+    value = in;
+endtask
+
+constraint Cls::SubCls::c { r < 5; }
+
+function int Other::SubCls::f(int in);
+    return in + 100;
+endfunction
+
+module m;
+    initial begin
+        automatic Cls c = new;
+        automatic Cls::SubCls s = new;
+        automatic Other::SubCls o = new;
+        $display(c.f(1), s.f(1), o.f(1), Cls::SubCls::get_10());
+        s.t(4);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Out-of-block definition of a nested class method that has no prototype") {
+    auto tree = SyntaxTree::fromText(R"(
+class Cls;
+    class SubCls;
+        extern function int f();
+    endclass
+endclass
+
+function int Cls::SubCls::f();
+    return 1;
+endfunction
+
+function int Cls::SubCls::nope();
+    return 2;
+endfunction
+
+function int Cls::Missing::f();
+    return 3;
+endfunction
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    // A definition with no prototype, and one naming a class that does not exist, are errors.
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::UndeclaredIdentifier);
+    CHECK(diags[1].code == diag::UndeclaredIdentifier);
+}
+
 TEST_CASE("Mutually recursive class specializations are diagnosed, not unbounded") {
     // [8.25]: ClsA#(N) holds a ClsB#(N + 1), which holds a ClsA#(N + 2), and so on, so the
     // chain of specializations has no end. It used to overflow the stack.

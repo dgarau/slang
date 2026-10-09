@@ -1156,7 +1156,7 @@ const SubroutineSymbol* MethodPrototypeSymbol::getSubroutine() const {
                             MethodFlags::InterfaceExtern));
 
     // The out-of-block definition must be in our parent scope.
-    auto [declSyntax, index, used] = comp.findOutOfBlockDecl(outerScope, parentSym.name, name);
+    auto [declSyntax, index, used] = comp.findOutOfBlockDecl(parentSym, name);
     const FunctionDeclarationSyntax* syntax = nullptr;
     if (declSyntax && (declSyntax->kind == SyntaxKind::FunctionDeclaration ||
                        declSyntax->kind == SyntaxKind::TaskDeclaration)) {
@@ -1184,16 +1184,23 @@ const SubroutineSymbol* MethodPrototypeSymbol::getSubroutine() const {
         return nullptr;
     }
 
-    // The method definition must be located after the class definition.
-    if (index <= parentSym.getIndex()) {
+    // The method definition must be located after the class definition. For a nested
+    // class that is the outermost class, which is what lives in the defining scope.
+    const Symbol* outermostClass = &parentSym;
+    while (outermostClass->getParentScope() &&
+           outermostClass->getParentScope()->asSymbol().kind == SymbolKind::ClassType) {
+        outermostClass = &outermostClass->getParentScope()->asSymbol();
+    }
+
+    if (index <= outermostClass->getIndex()) {
         auto& diag = outerScope.addDiag(diag::MemberDefinitionBeforeClass,
                                         syntax->prototype->name->getLastToken().location());
         diag << name << parentSym.name;
         diag.addNote(diag::NoteDeclarationHere, parentSym.location);
     }
 
-    subroutine = &SubroutineSymbol::createOutOfBlock(comp, *syntax, *this, nearScope, outerScope,
-                                                     index);
+    subroutine = &SubroutineSymbol::createOutOfBlock(comp, *syntax, *this, nearScope,
+                                                     *outermostClass->getParentScope(), index);
     return *subroutine;
 }
 
