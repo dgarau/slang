@@ -215,6 +215,13 @@ const ParameterSymbolBase& ParameterBuilder::createParam(
 
         if (!param->isLocalParam()) {
             if (forceInvalidValues) {
+                // [6.20.3] The default of a type parameter has to be a data type. Resolve it
+                // once so that a bad default (a variable, say) is reported even when nothing
+                // ever specializes the class, then go on to make the parameter invalid.
+                if (!newInitializer && decl.hasSyntax && decl.typeDecl &&
+                    decl.typeDecl->assignment && tt.getTypeSyntax()) {
+                    tt.forceResolveAt(ASTContext(newScope, LookupLocation::before(*param)));
+                }
                 tt.setType(comp.getErrorType());
             }
             else if (newInitializer) {

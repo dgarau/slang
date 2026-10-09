@@ -3275,3 +3275,23 @@ endmodule
     CHECK(diags[0].code == diag::DuplicateImport);
     CHECK(diags[1].code == diag::StaticInitValue);
 }
+
+TEST_CASE("Type parameter default that is not a type is diagnosed without a specialization") {
+    // [6.20.3]: the default of a type parameter has to be a data type, even if the class is
+    // never specialized.
+    auto tree = SyntaxTree::fromText(R"(
+int i;
+class Cls #(parameter type P_T = i);
+endclass
+
+class Ok #(parameter type A = int, parameter type B = A);
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::NotAType);
+}
