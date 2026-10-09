@@ -1053,6 +1053,30 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
         s = enclosingSym.getParentScope();
     }
 
+    // Mutually recursive generic classes (A#(N) holds a B#(N + 1), which holds an A#(N + 2),
+    // ...) never nest the same generic class in a lexical scope, so the walk above cannot see
+    // them. Follow the chain of specializations that requested each other instead, and count
+    // how often this generic class is already in it.
+    const ClassType* requester = nullptr;
+    for (const Scope* s = context.scope; s;) {
+        auto& enclosingSym = s->asSymbol();
+        if (enclosingSym.kind == SymbolKind::ClassType) {
+            auto& enclosing = enclosingSym.as<ClassType>();
+            if (enclosing.genericClass) {
+                requester = &enclosing;
+                break;
+            }
+        }
+        s = enclosingSym.getParentScope();
+    }
+
+    uint32_t requesterCount = 0;
+    for (auto r = requester; r; r = r->specializationRequester) {
+        if (r->genericClass == this)
+            requesterCount++;
+    }
+    specChainDepth = std::max(specChainDepth, requesterCount);
+
     if (specChainDepth > comp.getOptions().maxRecursiveClassSpecialization) {
         context.addDiag(diag::RecursiveClassSpecialization, instanceLoc) << name;
         return &comp.getErrorType();
@@ -1063,6 +1087,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
     auto classType = comp.emplace<ClassType>(comp, name, location);
     classType->genericClass = this;
     classType->specializationDepth = specChainDepth;
+    classType->specializationRequester = requester;
     classType->isUninstantiated = forceInvalidParams || context.scope->isUninstantiated();
     classType->setParent(*scope, getIndex());
 

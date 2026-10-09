@@ -4407,3 +4407,47 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::NotAGenericClass);
 }
+
+TEST_CASE("Mutually recursive class specializations are diagnosed, not unbounded") {
+    // [8.25]: ClsA#(N) holds a ClsB#(N + 1), which holds a ClsA#(N + 2), and so on, so the
+    // chain of specializations has no end. It used to overflow the stack.
+    auto tree = SyntaxTree::fromText(R"(
+typedef class ClsB;
+class ClsA #(parameter PARAM = 12);
+    ClsB #(PARAM + 1) b;
+endclass
+class ClsB #(parameter PARAM = 12);
+    ClsA #(PARAM + 1) a;
+endclass
+module t;
+    ClsA #(.PARAM(15)) c;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() >= 1);
+    CHECK(diags[0].code == diag::RecursiveClassSpecialization);
+}
+
+TEST_CASE("Mutually recursive class specializations that reach a fixed point are fine") {
+    auto tree = SyntaxTree::fromText(R"(
+typedef class ClsB;
+class ClsA #(parameter PARAM = 12);
+    ClsB #(PARAM) b;
+endclass
+class ClsB #(parameter PARAM = 12);
+    ClsA #(PARAM) a;
+endclass
+module t;
+    ClsA #(.PARAM(15)) c;
+    ClsB #(.PARAM(3)) d;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
