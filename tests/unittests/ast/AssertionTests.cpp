@@ -1910,6 +1910,32 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("The semicolon before endsequence is optional") {
+    // A.2.10: sequence_declaration ::= sequence id [ ( ports ) ] ; { assertion_variable_declaration }
+    //                                    sequence_expr [ ; ] endsequence [ : id ]
+    auto tree = SyntaxTree::fromText(R"(
+module m(input clk);
+    bit a, b;
+    sequence s_single;
+        @(posedge clk) a
+    endsequence
+    sequence s_multi;
+        @(posedge clk) (a ##1 b);
+    endsequence
+    sequence s_none;
+        @(posedge clk) a ##1 b
+    endsequence : s_none
+    ap_single: assert property (s_single);
+    ap_multi: assert property (s_multi);
+    ap_none: assert property (s_none);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("Immediate assertion member still requires a procedural context") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

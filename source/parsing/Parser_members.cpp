@@ -2645,7 +2645,9 @@ SequenceDeclarationSyntax& Parser::parseSequenceDeclaration(AttrList attributes)
         declarations.push_back(&parseLocalVariableDeclaration());
 
     auto& expr = parseSequenceExpr(0, /* isInProperty */ false);
-    auto semi2 = expect(TokenKind::Semicolon);
+
+    // [A.2.10]: sequence_declaration ::= sequence ... sequence_expr [ ; ] endsequence
+    auto semi2 = consumeIf(TokenKind::Semicolon);
     auto end = expect(TokenKind::EndSequenceKeyword);
 
     auto blockName = parseNamedBlockClause();
