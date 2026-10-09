@@ -1886,6 +1886,46 @@ endmodule
     NO_COMPILATION_ERRORS;
 }
 
+TEST_CASE("Immediate assertions in the action block of a module-level assertion") {
+    // [16.14.1]: the pass and fail statements of an assertion are ordinary procedural
+    // statements, and may themselves be immediate assertions.
+    auto tree = SyntaxTree::fromText(R"(
+module m(input clk);
+    logic [2:0] value;
+    int cnt_tt, cnt_tf, cnt_ft, cnt_ff;
+    assert property (@(negedge clk) disable iff (value[1]) value[2]) begin
+        assert (value[0]) ++cnt_tt;
+        else ++cnt_tf;
+    end
+    else begin
+        assert (value[0]) ++cnt_ft;
+        else ++cnt_ff;
+    end
+    cover property (@(posedge clk) value[0]) assert (value[1]);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Immediate assertion member still requires a procedural context") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    logic a;
+    assert (a);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::ImmediateAssertNotInProc);
+}
+
 TEST_CASE("untyped may be the first formal of a let, sequence or property") {
     // A.2.12 let_formal_type ::= data_type_or_implicit | untyped; A.2.10 property_formal_type
     // and sequence_formal_type likewise.
