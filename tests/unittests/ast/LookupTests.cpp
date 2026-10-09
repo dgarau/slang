@@ -3276,6 +3276,32 @@ endmodule
     CHECK(diags[1].code == diag::StaticInitValue);
 }
 
+TEST_CASE("Package export outside of a package names a package that must exist") {
+    // [26.6]: a package export is of the form package_name::name, and the package has to exist.
+    auto tree = SyntaxTree::fromText(R"(
+package p;
+    int x;
+endpackage
+
+export p::x;
+export p::*;
+export *::*;
+export nopkg::something;
+export nopkg2::*;
+
+module m;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::UnknownPackage);
+    CHECK(diags[1].code == diag::UnknownPackage);
+}
+
 TEST_CASE("Type parameter default that is not a type is diagnosed without a specialization") {
     // [6.20.3]: the default of a type parameter has to be a data type, even if the class is
     // never specialized.

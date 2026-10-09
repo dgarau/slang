@@ -586,6 +586,11 @@ public:
     /// but are otherwise unused by SystemVerilog code.
     void noteDPIExportDirective(const syntax::DPIExportSyntax& syntax, const Scope& scope);
 
+    /// Notes a package export declaration that appears outside of a package (in the
+    /// compilation unit, say), so that the packages it names can be checked to exist.
+    void noteNonPackageExport(const syntax::PackageExportDeclarationSyntax& syntax,
+                              const Scope& scope);
+
     /// A DPI export entry.
     struct DPIExport {
         /// The exported subroutine symbol.
@@ -1077,6 +1082,8 @@ private:
 
     // A list of raw DPI export directives collected during elaboration.
     std::vector<std::pair<const syntax::DPIExportSyntax*, const Scope*>> dpiExportDirectives;
+    std::vector<std::pair<const syntax::PackageExportDeclarationSyntax*, const Scope*>>
+        nonPackageExports;
 
     // Resolved DPI exports collected during elaboration.
     std::vector<DPIExport> dpiExports;

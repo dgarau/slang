@@ -1191,6 +1191,13 @@ void Compilation::noteDPIExportDirective(const DPIExportSyntax& syntax, const Sc
     dpiExportDirectives.emplace_back(&syntax, &scope);
 }
 
+void Compilation::noteNonPackageExport(const PackageExportDeclarationSyntax& syntax,
+                                       const Scope& scope) {
+    SLANG_ASSERT(!isFrozen());
+
+    nonPackageExports.emplace_back(&syntax, &scope);
+}
+
 void Compilation::addOutOfBlockDecl(const Scope& scope, const ScopedNameSyntax& name,
                                     const SyntaxNode& syntax, SymbolIndex index) {
     SLANG_ASSERT(!isFrozen());
@@ -1625,6 +1632,22 @@ void Compilation::elaborate() {
                         auto& diag = scope->addDiag(diag::NotAClass, classRange);
                         diag << className;
                     }
+                }
+            }
+        }
+    }
+
+    // [26.6] A package export names the package it exports from, which has to exist. Exports
+    // in a package are checked with the rest of the package; the ones outside of any package
+    // (in the compilation unit) are checked here.
+    if (!nonPackageExports.empty() && !hasFlag(CompilationFlags::LintMode)) {
+        auto exports = nonPackageExports;
+        for (auto& [syntax, scope] : exports) {
+            for (auto item : syntax->items) {
+                auto packageName = item->package.valueText();
+                if (item->package.kind == parsing::TokenKind::Identifier && !packageName.empty() &&
+                    !getPackage(packageName)) {
+                    scope->addDiag(diag::UnknownPackage, item->package.location()) << packageName;
                 }
             }
         }

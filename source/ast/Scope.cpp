@@ -277,7 +277,12 @@ void Scope::addMembers(const SyntaxNode& syntax) {
         }
         case SyntaxKind::PackageExportDeclaration: {
             // Package exports are tracked separately by PackageSymbol so that they don't collide
-            // with ordinary package members in this scope's name map.
+            // with ordinary package members in this scope's name map. One outside of a package
+            // has nothing to export from, but the package it names must still exist.
+            if (asSymbol().kind != SymbolKind::Package) {
+                compilation.noteNonPackageExport(syntax.as<PackageExportDeclarationSyntax>(),
+                                                 *this);
+            }
             break;
         }
         case SyntaxKind::HierarchyInstantiation:
