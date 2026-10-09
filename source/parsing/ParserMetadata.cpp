@@ -75,6 +75,22 @@ public:
         visitDefault(syntax);
     }
 
+    void handle(const PrimitiveInstantiationSyntax& syntax) {
+        std::string_view name = syntax.type.valueText();
+        if (!name.empty() && syntax.type.kind == TokenKind::Identifier) {
+            bool found = false;
+            for (auto& set : moduleDeclStack) {
+                if (set.find(name) != set.end()) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                meta.globalPrimitiveInstances.push_back(&syntax);
+        }
+        visitDefault(syntax);
+    }
+
     void handle(const GenerateBlockSyntax& syntax) {
         moduleDeclStack.emplace_back();
         visitDefault(syntax);
@@ -197,6 +213,9 @@ std::vector<std::string_view> ParserMetadata::getReferencedSymbols() const {
 
 void ParserMetadata::visitReferencedSymbols(function_ref<void(std::string_view)> func) const {
     for (auto name : globalInstances)
+        func(name->type.valueText());
+
+    for (auto name : globalPrimitiveInstances)
         func(name->type.valueText());
 
     for (auto idName : classPackageNames) {

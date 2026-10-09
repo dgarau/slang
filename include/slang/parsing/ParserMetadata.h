@@ -48,6 +48,13 @@ struct SLANG_EXPORT ParserMetadata {
     /// roots of the design, or to find references of a particular module.
     std::vector<const syntax::HierarchyInstantiationSyntax*> globalInstances;
 
+    /// A list of all primitive-style instantiations whose type is an identifier
+    /// (i.e. `name #value inst();`, which is a user-defined primitive or, when the
+    /// compilation allows bare value parameter assignments, a module instantiation).
+    /// Their type names are references to global definitions just like the entries
+    /// of globalInstances (SVMake FRONT, D-061).
+    std::vector<const syntax::PrimitiveInstantiationSyntax*> globalPrimitiveInstances;
+
     /// A list of all names parsed that could represent a package or class name,
     /// since they are simple names that appear on the left-hand side of a double colon.
     std::vector<const syntax::IdentifierNameSyntax*> classPackageNames;

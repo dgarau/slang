@@ -2941,7 +2941,26 @@ PrimitiveInstantiationSyntax& Parser::parsePrimitiveInstantiation(AttrList attri
                                                diag::ExpectedHierarchicalInstantiation,
                                                [this] { return &parseHierarchicalInstance(); });
 
-    return factory.primitiveInstantiation(attributes, type, strength, delay, {alloc, items}, semi);
+    auto& ret = factory.primitiveInstantiation(attributes, type, strength, delay, {alloc, items},
+                                               semi);
+
+    // An identifier-typed primitive instantiation (`name #value inst();`) refers to a global
+    // definition just as a hierarchy instantiation does: it is a user-defined primitive or,
+    // with the bare value parameter relaxation, a module (SVMake FRONT, D-061).
+    std::string_view name = type.valueText();
+    if (!name.empty() && type.kind == TokenKind::Identifier) {
+        bool found = false;
+        for (auto& set : moduleDeclStack) {
+            if (set.find(name) != set.end()) {
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            meta.globalPrimitiveInstances.push_back(&ret);
+    }
+
+    return ret;
 }
 
 CheckerInstantiationSyntax& Parser::parseCheckerInstantiation(AttrList attributes) {

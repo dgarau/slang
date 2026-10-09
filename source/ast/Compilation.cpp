@@ -270,6 +270,12 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
     for (auto& inst : tree->getMetadata().globalInstances)
         globalInstantiations.emplace(inst->type.valueText());
 
+    // `name #value inst();` is parsed as a primitive instantiation; with
+    // AllowBareValParamAssignment it instantiates the module `name`, so the module
+    // must not also be picked as a top-level (SVMake FRONT, D-061).
+    for (auto& inst : tree->getMetadata().globalPrimitiveInstances)
+        globalInstantiations.emplace(inst->type.valueText());
+
     if (node.kind == SyntaxKind::CompilationUnit) {
         for (auto member : node.as<CompilationUnitSyntax>().members)
             unit->addMembers(*member);
