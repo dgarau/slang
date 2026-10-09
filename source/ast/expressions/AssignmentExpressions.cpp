@@ -1400,6 +1400,26 @@ Expression& StructuredAssignmentPatternExpression::forStruct(
                 bad = true;
             }
         }
+        else if (item->key->kind == SyntaxKind::ScopedName) {
+            // [10.9.2] / A.8.1: an assignment_pattern_key may be a simple_type, which
+            // includes a package- or class-scoped type name such as `Pkg::color_t`.
+            auto& keyExpr = Expression::bind(*item->key, context, ASTFlags::AllowDataType);
+            if (keyExpr.bad()) {
+                bad = true;
+                continue;
+            }
+
+            if (keyExpr.kind == ExpressionKind::DataType && keyExpr.type->isSimpleType()) {
+                auto& typeKey = *keyExpr.type;
+                auto& expr = bindRValue(typeKey, *item->expr, {}, context);
+                typeSetters.emplace_back(TypeSetter{&typeKey, &expr});
+                bad |= expr.bad();
+            }
+            else {
+                context.addDiag(diag::AssignmentPatternKeyExpr, item->key->sourceRange());
+                bad = true;
+            }
+        }
         else {
             context.addDiag(diag::AssignmentPatternKeyExpr, item->key->sourceRange());
             bad = true;

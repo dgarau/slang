@@ -4808,3 +4808,51 @@ endmodule
     CHECK(get("ek").integer() == 1);
     CHECK(get("el").integer() == 1);
 }
+
+TEST_CASE("Struct assignment pattern with a package-scoped type key") {
+    // [10.9.2], A.8.1: assignment_pattern_key ::= simple_type, which includes ps_type_identifier.
+    auto tree = SyntaxTree::fromText(R"(
+package Pkg;
+    typedef enum { RED = 0, GREEN = 1, BLUE = 2 } color_t;
+    typedef struct { color_t a; color_t b; int c; } s_t;
+endpackage
+
+module m;
+    Pkg::s_t s;
+    initial s = '{default: 5, Pkg::color_t: Pkg::GREEN};
+    localparam Pkg::s_t p = '{default: 7, Pkg::color_t: Pkg::BLUE};
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& p = compilation.getRoot().lookupName<ParameterSymbol>("m.p");
+    auto cv = p.getValue();
+    CHECK(cv.elements()[0].integer() == 2);
+    CHECK(cv.elements()[1].integer() == 2);
+    CHECK(cv.elements()[2].integer() == 7);
+}
+
+TEST_CASE("Scoped non-type assignment pattern key on a struct is still an error") {
+    auto tree = SyntaxTree::fromText(R"(
+package Pkg;
+    localparam int X = 1;
+endpackage
+
+module m;
+    struct { int a; } s;
+    initial s = '{Pkg::X: 1};
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    bool found = false;
+    for (auto& d : diags)
+        found |= d.code == diag::AssignmentPatternKeyExpr;
+    CHECK(found);
+}
