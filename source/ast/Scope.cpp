@@ -96,25 +96,26 @@ std::optional<TimeScale> Scope::getTimeScale() const {
                 auto& declared = unit.timeScale;
                 if (!unitMember)
                     return declared;
+                // David Garau, 2026-10-08 (c1e): a unit's own elements take the unit's scale, which is the FIRST of
+                // its timeunit declarations and `timescale directives (getUnitTimeScale), not the directive in force
+                // where the element began. An element declared before any directive has none of its own (R1).
                 auto directive = getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
-                if (!declared)
-                    return directive;
-                // Declared by `timeunit` and/or `timeprecision`: each half the unit declares wins, the half it
-                // does not declare comes from the directive (a unit with only one half declared and no
-                // directive keeps the built-in default for the other, as before).
-                const bool hasUnit = unit.declaresTimeUnit();
-                const bool hasPrecision = unit.declaresTimePrecision();
-                if (hasUnit == hasPrecision || !directive)
+                if (!directive)
                     return declared;
-                TimeScale merged = *declared;
-                if (!hasUnit)
-                    merged.base = directive->base;
-                if (!hasPrecision)
-                    merged.precision = directive->precision;
-                return merged;
+                return getCompilation().getUnitTimeScale(unit);
             }
             case SymbolKind::Package:
                 return sym.as<PackageSymbol>().timeScale;
+            case SymbolKind::CheckerInstanceBody: {
+                // A checker is a design element: its time scale is the one of its DECLARATION (SVMake c1e), not
+                // of the scope that instantiates it.
+                auto& checker = sym.as<CheckerInstanceBodySymbol>().checker;
+                auto declScope = checker.getParentScope();
+                if (declScope && declScope->asSymbol().kind == SymbolKind::CompilationUnit)
+                    unitMember = &checker;
+                current = declScope;
+                break;
+            }
             case SymbolKind::InstanceBody:
                 return sym.as<InstanceBodySymbol>().getDefinition().timeScale;
             default: {
