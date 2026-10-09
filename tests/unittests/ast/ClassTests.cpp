@@ -4432,6 +4432,56 @@ endmodule
     CHECK(diags[0].code == diag::RecursiveClassSpecialization);
 }
 
+TEST_CASE("Constraint operands must be integral or real, including the index of a select") {
+    // [18.3]: "A constraint may be any expression containing operands of integral or real
+    // types only." A class handle, a struct or an unpacked array cannot index in a constraint.
+    auto tree = SyntaxTree::fromText(R"(
+class keyClass;
+    int id;
+endclass
+
+typedef struct { int a; int b; } UnpackedIndexType;
+typedef logic [2:0] IndexArrayType[3];
+
+class AssocArrayString;
+    rand int string_arr[string];
+    string s;
+    constraint c { string_arr["a_very_long_string"] == 65; string_arr[s] == 66; }
+endclass
+
+class AssocArrayInt;
+    rand int arr[int];
+    rand int x;
+    constraint c { arr[3] == 65; arr[x] == 66; foreach (arr[i]) arr[i] > 0; }
+endclass
+
+class AssocArrayClass;
+    rand bit [31:0] data[keyClass];
+    keyClass cl;
+    constraint c1 { data[cl] > 0; }
+endclass
+
+class AssocArrayUnpackedStruct;
+    rand bit [31:0] data[UnpackedIndexType];
+    constraint c2 { foreach (data[i]) data[i] < 100; }
+endclass
+
+class AssocArrayArrayIndex;
+    rand bit [31:0] data[IndexArrayType];
+    constraint c3 { foreach (data[i]) data[i] > 0; }
+endclass
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::InvalidConstraintExpr);
+    CHECK(diags[1].code == diag::InvalidConstraintExpr);
+    CHECK(diags[2].code == diag::InvalidConstraintExpr);
+}
+
 TEST_CASE("Mutually recursive class specializations that reach a fixed point are fine") {
     auto tree = SyntaxTree::fromText(R"(
 typedef class ClsB;

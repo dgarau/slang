@@ -174,6 +174,24 @@ struct ConstraintExprVisitor {
                 case ExpressionKind::CopyClass:
                     context.addDiag(diag::ExprNotConstraint, expr.sourceRange);
                     return fail();
+                case ExpressionKind::ElementSelect: {
+                    // [18.3] "A constraint may be any expression containing operands of
+                    // integral or real types only." The types of a select's base are not
+                    // checked (see above) so that associative arrays and arrays of strings
+                    // work, but the index is itself an operand: a class handle, a struct or
+                    // an unpacked array cannot index in a constraint. A string index is
+                    // accepted, as it is the index type of the associative array.
+                    auto& selector = expr.template as<ElementSelectExpression>().selector();
+                    auto& selectorType = *selector.type;
+                    if (!selector.bad() && !selectorType.isError() && !selectorType.isIntegral() &&
+                        !selectorType.isFloating() && !selectorType.isString() &&
+                        !selectorType.isUnbounded()) {
+                        context.addDiag(diag::InvalidConstraintExpr, selector.sourceRange)
+                            << selectorType;
+                        return fail();
+                    }
+                    break;
+                }
                 case ExpressionKind::RealLiteral:
                 case ExpressionKind::TimeLiteral:
                     if (context.getCompilation().languageVersion() < LanguageVersion::v1800_2023) {
