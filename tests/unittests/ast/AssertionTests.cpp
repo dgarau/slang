@@ -1885,3 +1885,29 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("untyped may be the first formal of a let, sequence or property") {
+    // A.2.12 let_formal_type ::= data_type_or_implicit | untyped; A.2.10 property_formal_type
+    // and sequence_formal_type likewise.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    let F(untyped a) = 30 + a;
+    let G(untyped a, untyped b) = 30 + a + b;
+    sequence s(untyped a);
+        a;
+    endsequence
+    property p(untyped a);
+        a;
+    endproperty
+    localparam int x = F(1);
+    localparam int y = G(1, 2);
+    if (x != 31 || y != 33) begin : bad
+        $error("wrong");
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

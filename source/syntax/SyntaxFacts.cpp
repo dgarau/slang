@@ -1172,6 +1172,7 @@ bool SyntaxFacts::isPossiblePropertyPortItem(TokenKind kind) {
         case TokenKind::LocalKeyword:
         case TokenKind::PropertyKeyword:
         case TokenKind::SequenceKeyword:
+        case TokenKind::UntypedKeyword:
         case TokenKind::Comma:
         case TokenKind::InputKeyword:
         case TokenKind::OutputKeyword:
