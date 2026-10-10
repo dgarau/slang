@@ -2387,6 +2387,15 @@ Expression& ReplicationExpression::fromSyntax(Compilation& compilation,
         return makeStringReplication();
 
     if (*count == 0) {
+        if (!context.flags.has(ASTFlags::InsideConcatenation) && right->type->isString()) {
+            // SVMake (6.16, Table 6-9): "If the value of multiplier is zero, then the result shall be of string type and
+            // shall be the empty string" -- legal on its own, unlike a zero replication of integral data.
+            selfDetermined(context, right);
+            result->concat_ = right;
+            result->type = &compilation.getStringType();
+            return *result;
+        }
+
         if (!context.flags.has(ASTFlags::InsideConcatenation)) {
             // Zero copies of string literals are the empty string here, rather than a zero-width
             // integral (LRM Table 6-9).
@@ -2459,6 +2468,25 @@ void ReplicationExpression::serializeTo(ASTSerializer& serializer) const {
     serializer.write("concat", concat());
 }
 
+// SVMake K-435: a stream "has a dynamic operand" when any of its operands is not fixed size, or is a `with` selection of
+// non-constant width, or is itself a stream with a dynamic operand. Such a stream has no self-determined width.
+static bool streamHasDynamicOperand(const StreamingConcatenationExpression& stream) {
+    for (auto& item : stream.streams()) {
+        if (item.operand->kind == ExpressionKind::Streaming) {
+            if (streamHasDynamicOperand(item.operand->as<StreamingConcatenationExpression>()))
+                return true;
+        }
+        else if (item.withExpr) {
+            if (!item.constantWithWidth)
+                return true;
+        }
+        else if (!item.operand->type->isFixedSize()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 Expression& StreamingConcatenationExpression::fromSyntax(
     Compilation& comp, const StreamingConcatenationExpressionSyntax& syntax,
     const ASTContext& context, const Type* assignmentTarget) {
@@ -2516,6 +2544,7 @@ Expression& StreamingConcatenationExpression::fromSyntax(
     }
 
     uint64_t bitstreamWidth = 0;
+    bool hasDynamicOperand = false;
     SmallVector<StreamExpression, 4> buffer;
     for (const auto argSyntax : syntax.expressions) {
         auto& arg = selfDetermined(comp, *argSyntax->expression, context,
@@ -2596,6 +2625,18 @@ Expression& StreamingConcatenationExpression::fromSyntax(
             argWidth = argType->getBitstreamWidth();
         }
 
+        if (arg.kind == ExpressionKind::Streaming) {
+            if (streamHasDynamicOperand(arg.as<StreamingConcatenationExpression>()))
+                hasDynamicOperand = true;
+        }
+        else if (withExpr) {
+            if (!constantWithWidth)
+                hasDynamicOperand = true;
+        }
+        else if (!argType->isFixedSize()) {
+            hasDynamicOperand = true;
+        }
+
         bitstreamWidth += argWidth;
         if (bitstreamWidth > Type::MaxBitWidth) {
             context.addDiag(diag::ObjectTooLarge, syntax.sourceRange());
@@ -2603,6 +2644,14 @@ Expression& StreamingConcatenationExpression::fromSyntax(
         }
 
         buffer.push_back({&arg, withExpr, constantWithWidth});
+    }
+
+    // SVMake K-435: outside a source/target context the stream is self-determined (a compat extension), and a stream of
+    // dynamically sized data has no width to give it a type -- Compilation::getType(0) asserted. 11.4.14 allows a stream
+    // only as an assignment or cast operand, so this is an error.
+    if (hasDynamicOperand && !context.flags.has(ASTFlags::StreamingAllowed)) {
+        context.addDiag(diag::BadStreamContext, syntax.operatorToken.location());
+        return badResult();
     }
 
     auto& result = *comp.emplace<StreamingConcatenationExpression>(
