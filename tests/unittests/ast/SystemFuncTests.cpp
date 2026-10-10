@@ -2590,6 +2590,43 @@ endmodule
     CHECK(diags[0].code == diag::AssociativeWildcardNotAllowed);
 }
 
+TEST_CASE("Integral string arguments to plusargs functions") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    reg [8*8:1] pstring;
+    int x, a, b, c, d;
+    initial begin
+        a = $test$plusargs(pstring);
+        b = $test$plusargs("HELLO");
+        c = $test$plusargs(64'h48454c4c4f000000);
+        d = $value$plusargs(pstring, x);
+        d = $value$plusargs("FOO=%d", x);
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Invalid argument to test plusargs") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    real r;
+    int x;
+    initial x = $test$plusargs(r);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::InvalidStringArg);
+}
+
 TEST_CASE("Invalid string argument to value plusargs") {
     auto tree = SyntaxTree::fromText(R"(
 module m;

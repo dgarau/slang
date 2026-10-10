@@ -586,11 +586,33 @@ public:
     }
 };
 
-class TestPlusArgsFunction : public NonConstantFunction {
+// §21.6: the argument is a string expression, and an integral value is a string by §6.16, so any
+// string-like type is accepted (a `reg [8*8:1]` variable or a packed literal, not only `string`).
+class TestPlusArgsFunction : public SystemSubroutine {
 public:
-    TestPlusArgsFunction(const Builtins& builtins) :
-        NonConstantFunction(KnownSystemName::TestPlusArgs, builtins.intType, 1,
-                            std::vector<const Type*>{&builtins.stringType}) {}
+    TestPlusArgsFunction() :
+        SystemSubroutine(KnownSystemName::TestPlusArgs, SubroutineKind::Function) {}
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!checkArgCount(context, false, args, range, 1, 1))
+            return comp.getErrorType();
+
+        const Type& ft = *args[0]->type;
+        if (!ft.canBeStringLike()) {
+            context.addDiag(diag::InvalidStringArg, args[0]->sourceRange) << ft;
+            return comp.getErrorType();
+        }
+
+        return comp.getIntType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
 
     // Return type is 'int' but the actual value is always either 0 or 1
     std::optional<bitwidth_t> getEffectiveWidth() const final { return 1; }
@@ -672,7 +694,7 @@ void Builtins::registerNonConstFuncs() {
     addSystemSubroutine(std::make_shared<StacktraceFunc>());
     addSystemSubroutine(std::make_shared<CountDriversFunc>());
     addSystemSubroutine(std::make_shared<GetPatternFunc>());
-    addSystemSubroutine(std::make_shared<TestPlusArgsFunction>(*this));
+    addSystemSubroutine(std::make_shared<TestPlusArgsFunction>());
 
     addSystemMethod(SymbolKind::EventType,
                     std::make_shared<NonConstantFunction>(KnownSystemName::Triggered, bitType, 0,
