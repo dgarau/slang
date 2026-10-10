@@ -79,6 +79,11 @@ public:
         return baseClass;
     }
 
+    /// True while this class is looking up its own base class name. During that lookup `getBaseClass()`
+    /// answers an error type (the re-entrancy sentinel), which is not a problem resolving the base:
+    /// name lookup must not take it for one and suppress its undeclared-identifier errors.
+    bool isResolvingBaseName() const { return resolvingBaseName; }
+
     /// Gets the list of interface classes that this class implements.
     /// If this class is itself an interface class, this is instead the list of
     /// interface classes that it extends from, if any.
@@ -193,6 +198,7 @@ private:
     void computeCycles() const;
 
     mutable const Type* baseClass = nullptr;
+    mutable bool resolvingBaseName = false;
     mutable const Symbol* baseConstructor = nullptr;
     mutable const ForwardingTypedefSymbol* firstForward = nullptr;
     mutable std::span<const Type* const> implementsIfaces;

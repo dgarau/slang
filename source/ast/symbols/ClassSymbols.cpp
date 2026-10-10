@@ -325,7 +325,11 @@ void ClassType::handleExtends(const ExtendsClauseSyntax& extendsClause, const AS
     auto& comp = context.getCompilation();
     baseClass = &comp.getErrorType();
 
+    // The sentinel above is not a failure to resolve the base: tell name lookup so (SVMake D-079 -- `extends nosuch;` and `extends pkg;`
+    // built with no diagnostic because the lookup started in this very class and took the sentinel for an error base class).
+    resolvingBaseName = true;
     auto baseType = Lookup::findClass(*extendsClause.baseName, context);
+    resolvingBaseName = false;
     if (!baseType)
         return;
 

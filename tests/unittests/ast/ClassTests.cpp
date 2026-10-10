@@ -4594,3 +4594,31 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("A class cannot extend a name that is not a class (1800-2023 8.13)") {
+    // CLASS-sweep D-079: `class bar extends pkg;` and `class bar extends nosuch;` built with no diagnostic at all.
+    auto tree = SyntaxTree::fromText(R"(
+package pkg;
+endpackage
+class a extends pkg;
+endclass
+class b extends nosuch;
+endclass
+module m;
+    a ai;
+    b bi;
+    initial begin
+        ai = new;
+        bi = new;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 2);
+    CHECK(diags[0].code == diag::UndeclaredButFoundPackage);   // a package name is not a type
+    CHECK(diags[1].code == diag::UndeclaredIdentifier);
+}
