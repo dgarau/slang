@@ -3326,6 +3326,59 @@ endmodule
     CHECK(diags[0].code == diag::BadStreamSize);
 }
 
+TEST_CASE("Self-determined streaming concat of dynamically sized data is an error, not an assert") {
+    // SVMake K-435: Compilation::getType(0) asserted on `x == {>>{q}}` under the compat flag.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit [7:0] q[$];
+    bit [7:0] f[2];
+    bit [7:0] a;
+    logic [15:0] x;
+    int n;
+    initial begin
+        if (x == {>>{q}}) ;          // dynamic
+        if (x == {>>{a, q}}) ;       // mixed fixed + dynamic
+        if (x == {>>{ {>>{q}} }}) ;  // nested dynamic
+        if (x == {>>{q with [n:n+1]}}) ;  // with range of non-constant width
+        if (x == {>>{f}}) ;          // fixed: still accepted
+        if (x == {>>{a, a}}) ;       // fixed: still accepted
+    end
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowSelfDeterminedStreamConcat;
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    // The empty `if (...) ;` bodies add warnings; only the stream diagnostics matter here.
+    size_t streamErrors = 0;
+    for (auto& d : compilation.getAllDiagnostics()) {
+        if (d.code == diag::BadStreamContext)
+            streamErrors++;
+    }
+    CHECK(streamErrors == 4);
+}
+
+TEST_CASE("Zero replication of a string is the empty string, alone or in a concatenation") {
+    // SVMake (M5): 6.16 Table 6-9; used to be ReplicationZeroOutsideConcat.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    string s = "ab";
+    string r, r2;
+    initial begin
+        r = {0{s}};
+        r2 = {s, {0{s}}, s};
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
 TEST_CASE("v1800-2023: Unsized integer literals can be any bit width") {
     auto options = optionsFor(LanguageVersion::v1800_2023);
     auto tree = SyntaxTree::fromText(R"(
