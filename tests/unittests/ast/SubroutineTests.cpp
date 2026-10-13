@@ -694,6 +694,65 @@ endmodule
     CHECK(diags[3].code == diag::ExternIfaceArrayMethod);
 }
 
+TEST_CASE("Extern iface method through a virtual interface needs no implementation of its own") {
+    // 1800-2023 25.7: the implementation is required in the module a modport is connected to; the synthetic
+    // example instance behind a virtual interface type is connected to nothing and must not be checked.
+    auto tree = SyntaxTree::fromText(R"(
+interface I;
+    logic [7:0] r;
+    extern task send(input logic [7:0] v);
+    extern function logic [7:0] peek();
+    modport prov(export send, peek);
+    modport cons(import send, peek);
+endinterface
+
+module drv(I.prov port);
+    task port.send(input logic [7:0] v); port.r = v; endtask
+    function logic [7:0] port.peek(); return port.r; endfunction
+endmodule
+
+module top;
+    I i1();
+    drv d(i1.prov);
+    virtual I.cons vc = i1;
+    virtual I vf = i1;
+    logic [7:0] x;
+    initial begin
+        vc.send(1);
+        vf.send(2);
+        x = vc.peek();
+        x = vf.peek();
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("Extern iface method: a real instance without an implementation is still an error beside a virtual use") {
+    auto tree = SyntaxTree::fromText(R"(
+interface I;
+    extern task send(input logic [7:0] v);
+    modport prov(export send);
+endinterface
+
+module top;
+    I i1();
+    virtual I vf = i1;
+    initial vf.send(2);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::MissingExternImpl);
+}
+
 TEST_CASE("Function non-ansi port defaults are illegal") {
     auto tree = SyntaxTree::fromText(R"(
 function foo;

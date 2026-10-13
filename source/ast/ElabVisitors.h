@@ -156,7 +156,11 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
             return;
 
         if (symbol.flags.has(MethodFlags::InterfaceExtern)) {
-            externIfaceProtos.push_back(&symbol);
+            // The synthetic example instance of a virtual interface type is never connected to a
+            // modport's implementer, so it has no implementation to check (1800-2023 25.7: the
+            // implementation is required in the instance a modport is connected to).
+            if (!visitingVirtualIfaceExample)
+                externIfaceProtos.push_back(&symbol);
 
             auto scope = symbol.getParentScope();
             SLANG_ASSERT(scope);
@@ -467,7 +471,9 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
             compilation.virtualIfaceInstances.clear();
 
             for (auto inst : vii) {
+                visitingVirtualIfaceExample = true;
                 inst->visit(*this);
+                visitingVirtualIfaceExample = false;
                 compilation.checkVirtualIfaceInstance(*inst);
             }
         }
@@ -612,6 +618,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     bool visitInstances = true;
     bool disableCache = false;
     bool hierarchyProblem = false;
+    bool visitingVirtualIfaceExample = false;
     flat_hash_map<InstanceCacheKey, InstanceCacheEntry> instanceCache;
     flat_hash_set<const InstanceBodySymbol*> activeInstanceBodies;
     flat_hash_set<const DefinitionSymbol*> usedIfacePorts;
