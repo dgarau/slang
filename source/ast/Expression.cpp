@@ -186,11 +186,20 @@ struct Expression::PropagationVisitor {
         bool needConversion = !newType.isEquivalent(*expr.type);
 
         // 1800-2023 11.8.1: "Expression type depends only on the operands. It does not
-        // depend on the left-hand side." A floating type that differs from the expression's own
-        // (real into shortreal, or shortreal into real) is therefore a conversion of the whole
-        // expression, never a retyping of its operators: `sr = ra * rb` multiplies in real and
-        // narrows once, and `r = sr / i` divides in shortreal and widens the quotient.
-        const bool floatingRetype = needConversion && newType.isFloating() && expr.type->isFloating();
+        // depend on the left-hand side." At the BOUNDARY of an expression -- an assignment, an
+        // argument, a port connection, a cast: the callers that pass no parent expression -- a
+        // floating type that differs from the expression's own (real into shortreal, or shortreal
+        // into real) is a conversion of the whole expression, never a retyping of its operators:
+        // `sr = ra * rb` multiplies in real and narrows once, and `r = sr / i` divides in shortreal
+        // and widens the quotient.
+        //
+        // NOT decided here, and unchanged: an operand NESTED in a real operator (`r = r1 + a * b`,
+        // `(a * b) + 0.0`). 11.8.2 propagates the operator's type down to its context-determined
+        // operands, and 6.12 calls real, shortreal and realtime "real variables", so slang's
+        // earlier answer (the shortreal product is retyped real) is a reading of the clause that
+        // the text supports; the other reading (it stays shortreal: C's float semantics) is
+        // probed before it is chosen (docs/engine/evidence/probes_round8/shortreal_nested_operand_r8.sv).
+        const bool floatingRetype = parentExpr == nullptr && needConversion && newType.isFloating() && expr.type->isFloating();
         if constexpr (requires { expr.propagateType(context, newType, opRange, conversionKind); }) {
             if ((newType.isFloating() && expr.type->isFloating() && !floatingRetype) ||
                 (newType.isIntegral() && expr.type->isIntegral()) || newType.isString() ||

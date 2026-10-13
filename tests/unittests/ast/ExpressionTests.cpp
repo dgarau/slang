@@ -180,35 +180,56 @@ TEST_CASE("A floating expression's type does not depend on the assignment target
         scope.addMembers(tree->root());
     };
     std::vector<std::shared_ptr<SyntaxTree>> trees;
-    auto bindAssignment = [&](const std::string& source) -> const AssignmentExpression& {
+    auto bindAssignment = [&](const std::string& source) -> const Expression& {
         trees.push_back(SyntaxTree::fromText(source));
         ASTContext context(scope, LookupLocation::max);
         return Expression::bind(trees.back()->root().as<ExpressionSyntax>(), context,
-                                ASTFlags::AssignmentAllowed)
-            .as<AssignmentExpression>();
+                                ASTFlags::AssignmentAllowed);
     };
 
     declare("shortreal sr; real r, ra, rb; int i;");
 
     // The quotient is a shortreal division, widened once above it.
-    auto& widen = bindAssignment("r = sr / i").right().as<ConversionExpression>();
+    auto& widenAssign = bindAssignment("r = sr / i");
+    REQUIRE(widenAssign.kind == ExpressionKind::Assignment);
+    auto& widenRhs = widenAssign.as<AssignmentExpression>().right();
+    REQUIRE(widenRhs.kind == ExpressionKind::Conversion);
+    auto& widen = widenRhs.as<ConversionExpression>();
     CHECK(widen.type->toString() == "real");
     CHECK(widen.operand().kind == ExpressionKind::BinaryOp);
     CHECK(widen.operand().type->toString() == "shortreal");
 
     // The product is a real multiplication, narrowed once above it (its operands are not narrowed).
-    auto& narrow = bindAssignment("sr = ra * rb").right().as<ConversionExpression>();
+    auto& narrowAssign = bindAssignment("sr = ra * rb");
+    REQUIRE(narrowAssign.kind == ExpressionKind::Assignment);
+    auto& narrowRhs = narrowAssign.as<AssignmentExpression>().right();
+    REQUIRE(narrowRhs.kind == ExpressionKind::Conversion);
+    auto& narrow = narrowRhs.as<ConversionExpression>();
     CHECK(narrow.type->toString() == "shortreal");
-    CHECK(narrow.operand().kind == ExpressionKind::BinaryOp);
+    REQUIRE(narrow.operand().kind == ExpressionKind::BinaryOp);
     CHECK(narrow.operand().type->toString() == "real");
     auto& product = narrow.operand().as<BinaryExpression>();
     CHECK(product.left().kind == ExpressionKind::NamedValue);
     CHECK(product.right().kind == ExpressionKind::NamedValue);
 
     // An integral operand of a real expression is still converted at the operand (11.8.2).
-    auto& mixed = bindAssignment("r = ra + i").right().as<BinaryExpression>();
+    auto& mixedAssign = bindAssignment("r = ra + i");
+    REQUIRE(mixedAssign.kind == ExpressionKind::Assignment);
+    auto& mixedRhs = mixedAssign.as<AssignmentExpression>().right();
+    REQUIRE(mixedRhs.kind == ExpressionKind::BinaryOp);
+    auto& mixed = mixedRhs.as<BinaryExpression>();
     CHECK(mixed.type->toString() == "real");
     CHECK(mixed.right().kind == ExpressionKind::Conversion);
+
+    // NOT decided by 11.8.1, and pinned to the behaviour before the boundary change: a shortreal product NESTED in a real
+    // operator is propagated into (retyped real), so it is not narrowed first.
+    auto& nestedAssign = bindAssignment("r = ra + sr * sr");
+    REQUIRE(nestedAssign.kind == ExpressionKind::Assignment);
+    auto& nestedRhs = nestedAssign.as<AssignmentExpression>().right();
+    REQUIRE(nestedRhs.kind == ExpressionKind::BinaryOp);
+    auto& nestedSum = nestedRhs.as<BinaryExpression>();
+    REQUIRE(nestedSum.right().kind == ExpressionKind::BinaryOp);
+    CHECK(nestedSum.right().type->toString() == "real");
 }
 
 TEST_CASE("Expression types") {
