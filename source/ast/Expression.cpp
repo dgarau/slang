@@ -184,8 +184,15 @@ struct Expression::PropagationVisitor {
         // check if the conversion should be pushed further down the tree. Otherwise we
         // should insert the implicit conversion here.
         bool needConversion = !newType.isEquivalent(*expr.type);
+
+        // 1800-2023 11.8.1: "Expression type depends only on the operands. It does not
+        // depend on the left-hand side." A floating type that differs from the expression's own
+        // (real into shortreal, or shortreal into real) is therefore a conversion of the whole
+        // expression, never a retyping of its operators: `sr = ra * rb` multiplies in real and
+        // narrows once, and `r = sr / i` divides in shortreal and widens the quotient.
+        const bool floatingRetype = needConversion && newType.isFloating() && expr.type->isFloating();
         if constexpr (requires { expr.propagateType(context, newType, opRange, conversionKind); }) {
-            if ((newType.isFloating() && expr.type->isFloating()) ||
+            if ((newType.isFloating() && expr.type->isFloating() && !floatingRetype) ||
                 (newType.isIntegral() && expr.type->isIntegral()) || newType.isString() ||
                 expr.kind == ExpressionKind::ValueRange) {
 
