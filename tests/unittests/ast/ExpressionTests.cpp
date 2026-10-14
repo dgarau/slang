@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Michael Popoloski
 // SPDX-License-Identifier: MIT
 
+#include "slang/ast/ASTVisitor.h"
+#include "slang/ast/Statement.h"
 #include "Test.h"
 
 #include "slang/ast/EvalContext.h"
@@ -230,6 +232,46 @@ TEST_CASE("A floating expression's type does not depend on the assignment target
     auto& nestedSum = nestedRhs.as<BinaryExpression>();
     REQUIRE(nestedSum.right().kind == ExpressionKind::BinaryOp);
     CHECK(nestedSum.right().type->toString() == "real");
+
+    // A membership operand is NOT a boundary: `rr == sr * sr` and `rr inside {sr * sr}` take the same (nested) rule -- the product is retyped real.
+    auto& equalAssign = bindAssignment("r = (ra == sr * sr)");
+    REQUIRE(equalAssign.kind == ExpressionKind::Assignment);
+    auto& equality = bindAssignment("ra == sr * sr");
+    REQUIRE(equality.kind == ExpressionKind::BinaryOp);
+    CHECK(equality.as<BinaryExpression>().right().kind == ExpressionKind::BinaryOp);
+    CHECK(equality.as<BinaryExpression>().right().type->toString() == "real");
+
+    auto& membership = bindAssignment("ra inside {sr * sr}");
+    REQUIRE(membership.kind == ExpressionKind::Inside);
+    auto ranges = membership.as<InsideExpression>().rangeList();
+    REQUIRE(ranges.size() == 1);
+    REQUIRE(ranges[0]->kind == ExpressionKind::BinaryOp);
+    CHECK(ranges[0]->type->toString() == "real");
+
+    // and a case item of a real subject (12.5)
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    shortreal a, b;
+    real rr;
+    initial begin
+        case (rr) a * b: ; default: ; endcase
+    end
+endmodule
+)");
+    Compilation caseCompilation;
+    caseCompilation.addSyntaxTree(tree);
+    size_t items = 0;
+    caseCompilation.getRoot().visit(makeVisitor([&](auto& visitor, const CaseStatement& statement) {
+        for (auto& item : statement.items) {
+            for (auto* expression : item.expressions) {
+                items++;
+                CHECK(expression->kind == ExpressionKind::BinaryOp);
+                CHECK(expression->type->toString() == "real");
+            }
+        }
+        visitor.visitDefault(statement);
+    }));
+    CHECK(items == 1);
 }
 
 TEST_CASE("Expression types") {

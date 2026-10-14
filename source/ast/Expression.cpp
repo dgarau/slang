@@ -199,7 +199,11 @@ struct Expression::PropagationVisitor {
         // earlier answer (the shortreal product is retyped real) is a reading of the clause that
         // the text supports; the other reading (it stays shortreal: C's float semantics) is
         // probed before it is chosen (docs/engine/evidence/probes_round8/shortreal_nested_operand_r8.sv).
-        const bool floatingRetype = parentExpr == nullptr && needConversion && newType.isFloating() && expr.type->isFloating();
+        // The null-parent callers are the assignment-like boundary (an assignment, an argument, a port connection, a return: Implicit),
+        // an explicit cast (Explicit) and the MEMBERSHIP binder (`inside`, case items, case-generate items: Propagated, the default). A membership
+        // operand is compared with == (11.4.13) or case-matched like a comparison's operands (12.5), so it keeps the nested rule below, as `==` does.
+        const bool floatingRetype = parentExpr == nullptr && conversionKind != ConversionKind::Propagated && needConversion &&
+                                    newType.isFloating() && expr.type->isFloating();
         if constexpr (requires { expr.propagateType(context, newType, opRange, conversionKind); }) {
             if ((newType.isFloating() && expr.type->isFloating() && !floatingRetype) ||
                 (newType.isIntegral() && expr.type->isIntegral()) || newType.isString() ||
