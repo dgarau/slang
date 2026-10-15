@@ -1097,6 +1097,7 @@ static IfaceParamAssignmentMap collectIfaceParamAssignments(const InstanceBodySy
 static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSymbol& port,
                                        const InstanceSymbol*& firstInst,
                                        ParameterBuilder& paramBuilder,
+                                       SmallVector<uint32_t>& path,
                                        std::span<const ConstantRange>::iterator it,
                                        std::span<const ConstantRange>::iterator end) {
     if (it == end) {
@@ -1104,6 +1105,7 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
                                                         paramBuilder, InstanceFlags::None);
 
         auto& result = *comp.emplace<InstanceSymbol>(port.name, port.location, body, 0u);
+        result.arrayPath = path.copy(comp);
 
         if (!firstInst)
             firstInst = &result;
@@ -1116,7 +1118,9 @@ static Symbol* recurseDefaultIfaceInst(Compilation& comp, const InterfacePortSym
 
     SmallVector<const Symbol*> elements;
     for (uint32_t i = 0; i < range.width(); i++) {
-        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramBuilder, it, end);
+        path.push_back(i);
+        auto symbol = recurseDefaultIfaceInst(comp, port, firstInst, paramBuilder, path, it, end);
+        path.pop_back();
         symbol->name = "";
         elements.push_back(symbol);
     }
@@ -1166,7 +1170,8 @@ void InstanceSymbol::connectDefaultIfacePorts() const {
                 const ModportSymbol* modport = nullptr;
                 if (auto dims = ifacePort.getDeclaredRange()) {
                     const InstanceSymbol* firstInst = nullptr;
-                    inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramBuilder,
+                    SmallVector<uint32_t> path;
+                    inst = recurseDefaultIfaceInst(comp, ifacePort, firstInst, paramBuilder, path,
                                                    dims->begin(), dims->end());
 
                     if (firstInst) {

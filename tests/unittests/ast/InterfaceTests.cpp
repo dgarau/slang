@@ -1882,3 +1882,82 @@ endmodule
     CHECK(diags[1].code == diag::NotAValue);
     CHECK(diags[2].code == diag::NotAValue);
 }
+
+// SVMake K-818: the default instances slang creates for a top-level interface-port ARRAY
+// (AllowTopLevelIfacePorts) carry their arrayPath like the elements of a declared instance array,
+// so each element's hierarchical name has its index: `a[0].x` and `a[1].x`, never `a.x` twice.
+TEST_CASE("SVMake K-818: default instances of a top-level interface port array are indexed") {
+    auto tree = SyntaxTree::fromText(R"(
+interface sub_if;
+    logic s;
+endinterface
+interface pif;
+    logic x;
+    sub_if sub();
+endinterface
+module t(pif a[2], pif b[1:0][3:2], pif c);
+    logic r1, r2, r3;
+    assign r1 = a[1].x;
+    assign r2 = b[1][2].sub.s;
+    assign r3 = c.x;
+endmodule
+)");
+
+    CompilationOptions options;
+    options.flags |= CompilationFlags::AllowTopLevelIfacePorts;
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& top = *compilation.getRoot().topInstances[0];
+    auto conn = [&](std::string_view name) -> const Symbol& {
+        for (auto c : top.getPortConnections()) {
+            if (c->port.name == name)
+                return *c->getIfaceConn().first;
+        }
+        FAIL("no connection");
+        SLANG_UNREACHABLE;
+    };
+    auto memberPath = [](const Symbol& inst, std::string_view name) {
+        return inst.as<InstanceSymbol>().body.find(name)->getHierarchicalPath();
+    };
+
+    auto& a = conn("a").as<InstanceArraySymbol>();
+    REQUIRE(a.elements.size() == 2);
+    for (uint32_t i = 0; i < 2; i++) {
+        auto& elem = a.elements[i]->as<InstanceSymbol>();
+        REQUIRE(elem.arrayPath.size() == 1);
+        CHECK(elem.arrayPath[0] == i);
+    }
+    CHECK(memberPath(*a.elements[0], "x") == "a[0].x");
+    CHECK(memberPath(*a.elements[1], "x") == "a[1].x");
+
+    // b[1:0][3:2]: elements are stored lowest index first, and a path prints index + lower bound.
+    auto& b = conn("b").as<InstanceArraySymbol>();
+    REQUIRE(b.elements.size() == 2);
+    auto& b1 = b.elements[1]->as<InstanceArraySymbol>();
+    auto& b12 = b1.elements[0]->as<InstanceSymbol>();
+    REQUIRE(b12.arrayPath.size() == 2);
+    CHECK(b12.arrayPath[0] == 1);
+    CHECK(b12.arrayPath[1] == 0);
+    CHECK(memberPath(b12, "x") == "b[1][2].x");
+    CHECK(memberPath(*b.elements[0]->as<InstanceArraySymbol>().elements[1], "x") == "b[0][3].x");
+    auto& sub = b12.body.find("sub")->as<InstanceSymbol>();
+    CHECK(sub.body.find("s")->getHierarchicalPath() == "b[1][2].sub.s");
+
+    // A scalar port's default instance is unchanged: no arrayPath, named by the port.
+    auto& c = conn("c").as<InstanceSymbol>();
+    CHECK(c.arrayPath.empty());
+    CHECK(memberPath(c, "x") == "c.x");
+
+    // A reference through the port resolves to the element the index names.
+    std::vector<std::string> resolved;
+    for (auto& assign : top.body.membersOfType<ContinuousAssignSymbol>()) {
+        auto& rhs = assign.getAssignment().as<AssignmentExpression>().right();
+        resolved.push_back(rhs.getSymbolReference()->getHierarchicalPath());
+    }
+    REQUIRE(resolved.size() == 3);
+    CHECK(resolved[0] == "a[1].x");
+    CHECK(resolved[1] == "b[1][2].sub.s");
+    CHECK(resolved[2] == "c.x");
+}
