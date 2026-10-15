@@ -374,6 +374,11 @@ void TypePrinter::visit(const PropertyType& type, std::string_view) {
 void TypePrinter::visit(const ClassType& type, std::string_view) {
     if (options.classesAsLinks)
         buffer->format("{} ", uintptr_t(&type));
+    if (options.typenameClassNames) {
+        // SVMake K-558/K-724 (20.6.1 f): the keyword, then the defining scope, as for an enum.
+        buffer->append("class ");
+        printScope(type.getParentScope());
+    }
     buffer->append(type.name);
     if (type.genericClass)
         appendParameters(type.genericParameters, false);

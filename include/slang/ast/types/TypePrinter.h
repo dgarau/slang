@@ -51,6 +51,12 @@ struct SLANG_EXPORT TypePrintingOptions {
     /// Print the constant range of integral types for packed non-array objects
     bool printIntegralRange = false;
 
+    /// SVMake K-558/K-724: print a class type as `$typename` (20.6.1) spells it: the `class `
+    /// keyword, then the defining scope's prefix (20.6.1 f), then the name: `class t.Cls`,
+    /// `class P::PCls`, `class t.Cls::Inner`. PROVISIONAL spelling (round-8 probe typename_class_r8:
+    /// Questa `class t/Cls`, VCS `class t.Cls`; Xcelium rejected the file).
+    bool typenameClassNames = false;
+
     /// Selects a style for anonymous types, either the system ID name
     /// or a more human-friendly name.
     enum AnonymousTypeStyle { SystemName, FriendlyName } anonymousTypeStyle = SystemName;
