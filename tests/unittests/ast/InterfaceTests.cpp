@@ -1196,6 +1196,35 @@ endmodule
     CHECK(std::count(c1b.begin(), c1b.end(), diag::ModportUninstantiatedBlock) == 2);   // .p and .w of i0 only
     CHECK(!has(c1b, diag::ModportMemberParent));
 
+    // At depth (re-check H1): an uninstantiated block INSIDE an instantiated one, and inside a for-generate element.
+    auto c1c = codes(R"(
+interface gif #(parameter int P = 1);
+    if (P) begin : g
+        logic [7:0] gx;
+        if (P > 1) begin : h
+            logic [7:0] hx;
+        end
+    end
+    for (genvar k = 0; k < 2; k++) begin : gl
+        if (k == 5) begin : z
+            logic [7:0] zx;
+        end
+        logic [7:0] v;
+    end
+    modport mh(input .q(g.h.hx), input .r(gl[0].z.zx), input .ok(gl[1].v), input .ok2(g.gx));
+endinterface
+module cons(gif.mh m);
+    logic [7:0] r;
+    assign r = m.q ^ m.r ^ m.ok ^ m.ok2;
+endmodule
+module top;
+    gif #(1) i1();
+    cons c1(.m(i1.mh));
+endmodule
+)");
+    CHECK(std::count(c1c.begin(), c1c.end(), diag::ModportUninstantiatedBlock) == 2);   // .q and .r; .ok/.ok2 connect
+    CHECK(!has(c1c, diag::ModportMemberParent));
+
     // A generate block of ANOTHER scope (the enclosing module), reached upward.
     auto c2 = codes(R"(
 module m;
