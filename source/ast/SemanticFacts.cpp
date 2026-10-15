@@ -11,6 +11,7 @@
 #include "slang/ast/Scope.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/symbols/ClassSymbols.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/PreprocessorDiags.h"
@@ -349,8 +350,19 @@ void SemanticFacts::populateTimeScale(std::optional<TimeScale>& timeScale, const
         return;
 
     std::optional<TimeScale> ts;
-    if (scope.asSymbol().kind == SymbolKind::CompilationUnit)
+    if (scope.asSymbol().kind == SymbolKind::CompilationUnit) {
         ts = directiveTimeScale;
+        if (!ts) {
+            // 3.14.2.3 c): the time unit (and, by "the same precedence", the precision) the compilation unit SPECIFIES,
+            // the other half the default: the unit's declaration as declared, not the merged scale its own elements
+            // use (SVMake W4-TU keeps upstream's answer here). A scope that takes the whole pair this way is noted, so
+            // the unit's check refuses the pair if it is inverted (K-595).
+            auto& unit = scope.asSymbol().as<CompilationUnitSymbol>();
+            ts = unit.timeScale;
+            if (ts && !unitsRange && !precisionRange)
+                unit.noteDeclaredScaleInherited();
+        }
+    }
 
     if (!ts)
         ts = scope.getTimeScale();

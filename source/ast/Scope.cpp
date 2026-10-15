@@ -94,17 +94,26 @@ std::optional<TimeScale> Scope::getTimeScale() const {
                 // subroutine declared at the unit takes the `timescale directive in force where it began.
                 auto& unit = sym.as<CompilationUnitSymbol>();
                 auto& declared = unit.timeScale;
-                if (!unitMember)
-                    return declared;
                 // David Garau, 2026-10-08 (c1e): a unit's own elements take the unit's scale, which is the FIRST of
                 // its timeunit declarations and `timescale directives (getUnitTimeScale), not the directive in force
-                // where the element began. An element declared before any directive has none of its own (R1).
-                auto directive = getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax());
+                // where the element began. An element declared before any directive has none of its own (R1) unless the
+                // unit declares a half (below).
+                auto directive = unitMember
+                                     ? getCompilation().getMemberDirectiveTimeScale(unitMember->getSyntax())
+                                     : std::nullopt;
+                // A checker is a design element: the directive in force at its declaration (3.2, 22.7).
+                if (directive && unitMember->kind == SymbolKind::Checker)
+                    return directive;
+                // SVMake W4-TU (K-595 review HIGH-1): a unit that DECLARES a half has one scale, the merged one, for
+                // every reader -- an element declared before the first directive (R1) included -- so the scale
+                // checked (checkInferredTimeScale) is the one used. It used to be the declared half with the other
+                // default-filled, inverted and never checked.
+                // (A module or package taking the unit's scale under 3.14.2.3 c) reads the declaration itself, in
+                // SemanticFacts::populateTimeScale, as upstream does.)
+                if (unit.declaresTimeUnit() || unit.declaresTimePrecision())
+                    return getCompilation().getUnitTimeScale(unit);
                 if (!directive)
                     return declared;
-                // A checker is a design element: the directive in force at its declaration (3.2, 22.7).
-                if (unitMember->kind == SymbolKind::Checker)
-                    return directive;
                 return getCompilation().getUnitTimeScale(unit);
             }
             case SymbolKind::Package:

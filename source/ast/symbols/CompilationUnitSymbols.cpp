@@ -16,6 +16,7 @@
 #include "slang/ast/types/NetType.h"
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
+#include "slang/diagnostics/PreprocessorDiags.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang/syntax/SyntaxTree.h"
 
@@ -61,6 +62,26 @@ void CompilationUnitSymbol::addMembers(const SyntaxNode& syntax) {
         anyMembers = true;
         Scope::addMembers(syntax);
     }
+}
+
+void CompilationUnitSymbol::checkInferredTimeScale() {
+    // Both halves declared: populateTimeScale already checked the pair (InvalidTimeScalePrecision). Neither: the
+    // unit has no scale of its own to check (a directive's own pair is a directive's).
+    if (unitsRange.has_value() == precisionRange.has_value())
+        return;
+
+    // The scale the unit's own elements and `$unit` use; else, when a design element took the declared pair whole
+    // (3.14.2.3 c), that pair (it differs from the merged one only when a directive follows).
+    auto inverted = [](const std::optional<TimeScale>& ts) { return ts && ts->precision > ts->base; };
+    auto scale = getCompilation().getUnitTimeScale(*this);
+    if (!inverted(scale)) {
+        if (!declaredScaleInherited || !inverted(timeScale))
+            return;
+        scale = timeScale;
+    }
+
+    auto& diag = addDiag(diag::InvalidInferredTimeScale, precisionRange ? *precisionRange : *unitsRange);
+    diag << scale->toString();
 }
 
 PackageSymbol::PackageSymbol(Compilation& compilation, std::string_view name, SourceLocation loc,
