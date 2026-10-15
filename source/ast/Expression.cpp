@@ -1118,6 +1118,35 @@ static bool isSelectOfHandle(const Symbol& symbol,
     return type->isObjectHandleType();
 }
 
+// SVMake K-631b: the nested interface instance whose modport `modport` a lookup through a
+// virtual interface of `iface` found, taken from the lookup's own path (which starts at `iface` and
+// ends at the modport): every element between a named (not indexed) Instance, each a member of the
+// previous one's body, the last one's body the modport's parent. Null otherwise.
+static const InstanceSymbol* nestedModportInstance(const LookupResult& result,
+                                                   const InstanceSymbol& iface,
+                                                   const Symbol& modport) {
+    if (result.upwardCount != 0 || result.path.empty())
+        return nullptr;
+
+    const InstanceSymbol* last = nullptr;
+    const Scope* expectParent = &iface.body;
+    for (auto& elem : result.path) {
+        if (elem.symbol == &iface || elem.symbol == &modport)
+            continue;
+        if (elem.symbol->kind != SymbolKind::Instance ||
+            !std::holds_alternative<std::string_view>(elem.selector) ||
+            elem.symbol->getParentScope() != expectParent) {
+            return nullptr;
+        }
+        last = &elem.symbol->as<InstanceSymbol>();
+        expectParent = &last->body;
+    }
+
+    if (!last || !last->isInterface() || modport.getParentScope() != &last->body)
+        return nullptr;
+    return last;
+}
+
 Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result,
                                          const InvocationExpressionSyntax* invocation,
                                          const ArrayOrRandomizeMethodExpressionSyntax* withClause,
@@ -1233,15 +1262,32 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
                 accessViaExpr->type->isVirtualInterface() && result.selectors.empty() &&
                 !context.flags.has(ASTFlags::LValue)) {
                 auto& vit = accessViaExpr->type->getCanonicalType().as<VirtualInterfaceType>();
-                // Only a modport of the handle's OWN interface: `va.sub.rd` names a modport of a
-                // NESTED interface instance, which `vit.iface` is not (typing it as
-                // `virtual top_if.rd` would be a wrong type). That form stays refused (NotAValue)
-                // until it is probed (FRONT-r6b scope).
+                // A modport of the handle's OWN interface types as `virtual <iface>.<modport>`.
                 if (symbol->getParentScope() == &vit.iface.body) {
                     auto type = comp.emplace<VirtualInterfaceType>(
                         vit.iface, &symbol->as<ModportSymbol>(),
                         /* isRealIface */ false, result.nameRange.start());
                     expr = &convertAssignment(context, *type, *accessViaExpr, result.nameRange);
+                    break;
+                }
+
+                // SVMake K-631b (K-713): a modport of a NESTED interface instance reached through
+                // the handle (`va.sub.rdmp`, `va.mid.sub.rdmp`) is the virtual interface value
+                // `va.sub` (exactly what that name binds to) narrowed to the modport. Accepted 4-0
+                // by Questa, Xcelium, VCS and Riviera-PRO (round-8 probe modport_vif_nested_r8;
+                // 25.9 is silent). The nested instance is the LOOKUP PATH's last element, never a
+                // parentInstance walk (instance bodies are shared through the instance cache).
+                // Every step must be a plain named instance: an instance-array element stays
+                // refused (not probed).
+                if (auto nested = nestedModportInstance(result, vit.iface, *symbol)) {
+                    auto subType = comp.emplace<VirtualInterfaceType>(
+                        *nested, nullptr, /* isRealIface */ true, result.nameRange.start());
+                    auto& subExpr = *comp.emplace<MemberAccessExpression>(
+                        *subType, *accessViaExpr, *nested, result.nameRange);
+                    auto type = comp.emplace<VirtualInterfaceType>(
+                        *nested, &symbol->as<ModportSymbol>(),
+                        /* isRealIface */ false, result.nameRange.start());
+                    expr = &convertAssignment(context, *type, subExpr, result.nameRange);
                     break;
                 }
             }

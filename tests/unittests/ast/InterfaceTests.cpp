@@ -1756,27 +1756,76 @@ endmodule
     CHECK(diags[3].code == diag::CouldNotResolveHierarchicalPath);
 }
 
-TEST_CASE("Modport of a NESTED interface selected through a virtual interface stays refused (FRONT-r6)") {
-    // `va.sub.rd` names a modport of the nested instance `sub`, not of the handle's own interface:
-    // typing it as `virtual top_if.rd` was a wrong type (and a silent wrong value). Refused.
+TEST_CASE("SVMake K-631b: a modport of a NESTED interface selected through a virtual interface") {
+    // 4-0 accepted by the tools (round-8 probe modport_vif_nested_r8): `va.sub.rd` is the virtual interface
+    // value `va.sub` narrowed to the modport, typed `virtual leaf.rd` (NOT `virtual top_if.rd`).
     auto tree = SyntaxTree::fromText(R"(
-interface leaf;
-    logic [7:0] v;
+interface leaf #(parameter int W = 8);
+    logic [W-1:0] v;
     modport rd(input v);
+endinterface
+interface mid_if;
+    leaf sub();
 endinterface
 interface top_if;
     leaf sub();
     leaf sub2();
+    mid_if mid();
     logic d;
     modport mp(input d);
 endinterface
 
 module m;
     top_if a();
+    leaf solo();
     virtual top_if va = a;
+    virtual leaf.rd lr = va.sub.rd;
+    virtual leaf.rd l2;
+    virtual leaf.rd l3;
+    initial begin
+        l2 = va.mid.sub.rd;
+        l3 = solo.rd;
+        l3 = va.sub2.rd;
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& top = compilation.getRoot().lookupName<InstanceSymbol>("m");
+    auto& lr = top.body.find<VariableSymbol>("lr");
+    auto init = lr.getInitializer();
+    REQUIRE(init);
+    CHECK(init->type->toString() == "leaf#(W=8).rd");
+    auto& conv = init->as<ConversionExpression>();
+    auto& access = conv.operand().as<MemberAccessExpression>();
+    CHECK(access.member.name == "sub");
+    CHECK(access.value().type->isVirtualInterface());
+}
+
+TEST_CASE("SVMake K-631b: nested modport through a virtual interface -- what stays refused") {
+    auto tree = SyntaxTree::fromText(R"(
+interface leaf;
+    logic [7:0] v;
+    modport rd(input v);
+    modport wr(output v);
+endinterface
+interface top_if;
+    leaf sub();
+    leaf arr[2]();
+endinterface
+
+module m;
+    top_if a();
+    virtual top_if va = a;
+    virtual leaf.wr lw;
     virtual leaf.rd lr;
     initial begin
-        lr = va.sub.rd;
+        lw = va.sub.rd;       // wrong modport: not assignable
+        va.sub.rd = lr;       // not an lvalue
+        lr = va.arr[1].rd;    // an instance-array element: not probed, refused
     end
 endmodule
 )");
@@ -1785,10 +1834,8 @@ endmodule
     compilation.addSyntaxTree(tree);
 
     auto& diags = compilation.getAllDiagnostics();
-    bool sawNotAValue = false;
-    for (auto& d : diags)
-        sawNotAValue |= d.code == diag::NotAValue;
-    CHECK(sawNotAValue);
-    for (auto& d : diags)
-        CHECK(d.code != diag::BadAssignment);
+    REQUIRE(diags.size() == 3);
+    CHECK(diags[0].code == diag::BadAssignment);
+    CHECK(diags[1].code == diag::NotAValue);
+    CHECK(diags[2].code == diag::NotAValue);
 }
