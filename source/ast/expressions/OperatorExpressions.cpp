@@ -2302,6 +2302,63 @@ static bool streamHasDynamicOperand(const StreamingConcatenationExpression& stre
     return false;
 }
 
+// SVMake K-439 -- the slice a SOURCE-side (pack) `with` range selects from a queue or dynamic array. 11.4.14.4 makes the
+// range "the same as an array slice", and 7.10.1 gives a queue slice Q[a:b]: a > b is the empty queue, an x/z bound is
+// the empty queue, and a < 0 is Q[0:b]. Past the array's extent the elements stay 11.4.14.4's nonexistent-entry fill
+// (resizeToRange). The reversed row is clause-decided (stream_readings_r8 ROW 1: Xcelium and VCS, 2-1); the x/z and
+// negative rows match the engine's run time (streaming_pack_with W7/W9), pending the tools' +ROW=2..3 answers. A
+// DESTINATION range is not taken through here: the unpack's rules are Bitstream.cpp's (K-458).
+// Returns false when the range cannot be evaluated; `empty` is set when the slice selects nothing.
+static bool evalPackWithRange(const Expression& withExpr, const Type& arrayType, const ConstantValue* value,
+                              EvalContext& context, ConstantRange& range, bool& empty) {
+    empty = false;
+    if (!arrayType.hasFixedRange() && withExpr.kind == ExpressionKind::RangeSelect) {
+        auto& select = withExpr.as<RangeSelectExpression>();
+        auto prevQ = context.getQueueTarget();
+        if (value && value->isQueue())
+            context.setQueueTarget(value);
+        ConstantValue cl = select.left().eval(context);
+        ConstantValue cr = select.right().eval(context);
+        context.setQueueTarget(prevQ);
+        if (!cl || !cr)
+            return false;
+        if ((cl.isInteger() && cl.integer().hasUnknown()) ||
+            (cr.isInteger() && cr.integer().hasUnknown())) {
+            empty = true;
+            return true;
+        }
+    }
+
+    std::optional<ConstantRange> evaluated;
+    {
+        auto prevQ = context.getQueueTarget();
+        if (value && value->isQueue())
+            context.setQueueTarget(value);
+        evaluated = withExpr.evalSelector(context, /* enforceBounds */ false);
+        context.setQueueTarget(prevQ);
+    }
+    if (!evaluated)
+        return false;
+
+    range = *evaluated;
+    if (arrayType.hasFixedRange() || withExpr.kind != ExpressionKind::RangeSelect)
+        return true;
+
+    auto& select = withExpr.as<RangeSelectExpression>();
+    if (select.getSelectionKind() == RangeSelectionKind::Simple && range.left > range.right) {
+        empty = true;
+        return true;
+    }
+    if (range.lower() < 0) {
+        if (range.upper() < 0) {
+            empty = true;
+            return true;
+        }
+        range = {0, range.upper()};
+    }
+    return true;
+}
+
 Expression& StreamingConcatenationExpression::fromSyntax(
     Compilation& comp, const StreamingConcatenationExpressionSyntax& syntax,
     const ASTContext& context, const Type* assignmentTarget) {
@@ -2390,8 +2447,14 @@ Expression& StreamingConcatenationExpression::fromSyntax(
             // If they are constant, we've already done bounds checking and
             // max size checking on them.
             EvalContext evalCtx(context);
-            auto range = withExpr->evalSelector(evalCtx, /* enforceBounds */ false);
-            if (range) {
+            if (!isDestination) {
+                // SVMake K-439: a pack's constant slice width follows the same rules as its evaluation.
+                ConstantRange packRange;
+                bool empty = false;
+                if (evalPackWithRange(*withExpr, *argType, nullptr, evalCtx, packRange, empty))
+                    constantWithWidth = empty ? 0 : packRange.width();
+            }
+            else if (auto range = withExpr->evalSelector(evalCtx, /* enforceBounds */ false)) {
                 // SVMake K-458: a reversed simple range on a queue or dynamic array is the EMPTY range (7.10.1), so its
                 // constant width is 0 -- as the unpack consumes nothing for it.
                 const bool reversed = !argType->hasFixedRange() &&
@@ -2509,16 +2572,28 @@ ConstantValue StreamingConcatenationExpression::evalImpl(EvalContext& context) c
             return nullptr;
 
         if (stream.withExpr) {
-            auto range = stream.withExpr->evalSelector(context, /* enforceBounds */ false);
-            if (!range)
+            // SVMake K-439: the slice per 7.10.1 (see evalPackWithRange); an empty one streams nothing.
+            ConstantRange range;
+            bool empty = false;
+            if (!evalPackWithRange(*stream.withExpr, *stream.operand->type, &cv, context, range,
+                                   empty)) {
                 return nullptr;
+            }
 
-            // If the range expression evaluates to a range greater than the extent of the array
-            // size, the entire array is streamed, and the remaining items are generated using the
-            // nonexistent array entry value
-            cv = Bitstream::resizeToRange(
-                std::move(cv), *range,
-                stream.operand->type->getArrayElementType()->getDefaultValue());
+            if (empty) {
+                if (cv.isQueue())
+                    cv = SVQueue();
+                else
+                    cv = ConstantValue::Elements();
+            }
+            else {
+                // If the range expression evaluates to a range greater than the extent of the array
+                // size, the entire array is streamed, and the remaining items are generated using the
+                // nonexistent array entry value
+                cv = Bitstream::resizeToRange(
+                    std::move(cv), range,
+                    stream.operand->type->getArrayElementType()->getDefaultValue());
+            }
         }
 
         values.emplace_back(std::move(cv));

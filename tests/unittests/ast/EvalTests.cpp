@@ -2589,6 +2589,53 @@ endfunction
     NO_SESSION_ERRORS;
 }
 
+TEST_CASE("SVMake K-439: a constant pack's with range on a queue is a 7.10.1 slice") {
+    // a > b is the empty slice (clause-decided: 7.10.1 via 11.4.14.4; Xcelium and VCS agree, round-8 stream_readings_r8 ROW 1);
+    // an x/z bound is empty and a < 0 reads from 0 -- as the engine's run time (streaming_pack_with W7/W9); past the
+    // extent stays 11.4.14.4's nonexistent-entry fill.
+    ScriptSession session;
+    session.eval(R"(
+typedef byte bq_t[$];
+localparam bq_t P = '{8'h01, 8'h02, 8'h03, 8'h04};
+localparam logic [31:0] XB = 'x;
+localparam logic [31:0] F1 = {>>{P with [3:1]}};
+localparam logic [31:0] F2 = {>>{P with [XB:2]}};
+localparam logic [31:0] F3 = {>>{P with [-1:1]}};
+localparam logic [31:0] F4 = {>>{P with [2:5]}};
+localparam logic [31:0] F5 = {>>{P with [XB +: 1]}};
+localparam logic [31:0] F6 = {>>{P with [-3:-1]}};
+localparam logic [31:0] F7 = {>>{P with [1:$]}};
+localparam bq_t D3 = {>>{P with [-1:1]}};
+localparam bq_t D4 = {>>{P with [2:5]}};
+localparam bq_t D1 = {>>{P with [3:1]}};
+function bq_t u1();
+    byte q[$];
+    {>>{q with [-1:1]}} = 24'hA1B2C3;
+    return q;
+endfunction
+)");
+
+    CHECK(session.eval("F1").integer() == "32'h00000000"_si);
+    CHECK(session.eval("F2").integer() == "32'h00000000"_si);
+    CHECK(session.eval("F3").integer() == "32'h01020000"_si);
+    CHECK(session.eval("F4").integer() == "32'h03040000"_si);
+    CHECK(session.eval("F5").integer() == "32'h00000000"_si);
+    CHECK(session.eval("F6").integer() == "32'h00000000"_si);
+    CHECK(session.eval("F7").integer() == "32'h02030400"_si);
+    CHECK(session.eval("D3").queue()->size() == 2);
+    CHECK(session.eval("D4").queue()->size() == 4);   // fill to the range, not clamped (11.4.14.4)
+    CHECK(session.eval("D1").queue()->size() == 0);
+
+    // The UNPACK side is not taken through the pack rule: a constant [-1:1] destination stays 3 wide (24 bits bind
+    // with no size error), and the run time skips the negative position as K-458 made it.
+    auto q = *session.eval("u1()").queue();
+    REQUIRE(q.size() == 2);
+    CHECK(q[0].integer() == "8'shb2"_si);
+    CHECK(q[1].integer() == "8'shc3"_si);
+
+    NO_SESSION_ERRORS;
+}
+
 TEST_CASE("SVMake K-458: a with range on a multi-dimensional array is refused (11.4.14.4)") {
     auto tree = SyntaxTree::fromText(R"(
 module m;
