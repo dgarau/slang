@@ -1037,8 +1037,8 @@ endmodule
 }
 
 TEST_CASE("Modport expression naming a nested instance member: names that stay errors (S4)") {
-    // (a) upward / absolute, (b) a sibling instance of the enclosing module, (c) a generate
-    // block member of the interface itself, (d) a generate block member INSIDE the nested
+    // (a) upward / absolute, (b) a sibling instance of the enclosing module, (c) [K-631a: now
+    // accepted], (d) a generate block member INSIDE the nested
     // instance, (e) the nested instance's own interface port, (f) the interface's own name.
     const std::string common = R"(
 interface leaf_if;
@@ -1084,15 +1084,7 @@ endinterface
 module top; m mi(); endmodule
 )")));
 
-    CHECK(bad(only(R"(
-interface holder;
-    if (1) begin : g
-        logic [7:0] gv;
-    end
-    modport mp(input .q(g.gv));
-endinterface
-module top; holder h(); endmodule
-)")));
+    // (c) moved to K-631a (accepted): see "Modport expression naming a generate block member".
 
     CHECK(bad(only(R"(
 interface holder;
@@ -1118,6 +1110,107 @@ interface holder;
 endinterface
 module top; holder h(); endmodule
 )")));
+}
+
+TEST_CASE("SVMake K-631a: modport expression naming a generate block member of the interface") {
+    // 3-1 accepted by the tools (round-8 probe modport_expr_generate_r8): if-, for- and nested generate blocks.
+    auto tree = SyntaxTree::fromText(R"(
+interface gif;
+    if (1) begin : g
+        logic [7:0] gx;
+        logic [7:0] gy;
+        if (1) begin : h
+            logic [7:0] hz;
+        end
+    end
+    for (genvar i = 0; i < 2; i++) begin : gl
+        logic [7:0] v;
+    end
+    modport mp(input .pg(g.gx), output .pw(g.gy), input .pl(gl[1].v), input .ph(g.h.hz),
+               input .pc({g.gx, gl[0].v}));
+endinterface
+module cons(gif.mp p);
+    logic [7:0] seen;
+    assign p.pw = p.pg + 8'h11;
+    always_comb seen = p.pl ^ p.ph ^ p.pc[7:0];
+endmodule
+module top;
+    gif i();
+    cons c(.p(i.mp));
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& top = compilation.getRoot().lookupName<InstanceSymbol>("top");
+    auto& i = top.body.find<InstanceSymbol>("i");
+    auto& mp = i.body.find<ModportSymbol>("mp");
+    auto& pg = mp.find<ModportPortSymbol>("pg");
+    REQUIRE(pg.explicitConnection);
+    CHECK(pg.getType().toString() == "logic[7:0]");
+    auto& hv = pg.explicitConnection->as<HierarchicalValueExpression>();
+    CHECK(hv.symbol.name == "gx");
+    CHECK(hv.symbol.getParentScope()->asSymbol().name == "g");
+}
+
+TEST_CASE("SVMake K-631a: generate block names that stay errors in a modport expression") {
+    auto codes = [](const std::string& body) { return modportExprCodes(body); };
+    auto has = [](const std::vector<DiagCode>& cs, DiagCode code) {
+        return std::find(cs.begin(), cs.end(), code) != cs.end();
+    };
+
+    // An uninstantiated `if (0)` block: the lookup into it fails (Lookup.cpp refuses to descend into an
+    // uninstantiated generate block), so the port has no connection and an error type.
+    {
+        auto tree = SyntaxTree::fromText(R"(
+interface holder;
+    if (0) begin : g
+        logic [7:0] gv;
+    end
+    modport mp(input .q(g.gv));
+endinterface
+module top; holder h(); endmodule
+)");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        auto& top = compilation.getRoot().lookupName<InstanceSymbol>("top");
+        auto& h = top.body.find<InstanceSymbol>("h");
+        auto& q = h.body.find<ModportSymbol>("mp").find<ModportPortSymbol>("q");
+        CHECK(q.getType().isError());
+        CHECK((!q.explicitConnection || q.explicitConnection->bad()));
+    }
+
+    // A generate block of ANOTHER scope (the enclosing module), reached upward.
+    auto c2 = codes(R"(
+module m;
+    if (1) begin : g
+        logic [7:0] gv;
+    end
+    holder h();
+endmodule
+interface holder;
+    modport mp(input .q(m.g.gv));
+endinterface
+module top; m mi(); endmodule
+)");
+    CHECK(has(c2, diag::ModportMemberParent));
+
+    // A nested instance inside a generate block (a mixed chain): not probed, stays an error.
+    auto c3 = codes(R"(
+interface leaf_if;
+    logic [7:0] v;
+endinterface
+interface holder;
+    if (1) begin : g
+        leaf_if inner ();
+    end
+    modport mp(input .q(g.inner.v));
+endinterface
+module top; holder h(); endmodule
+)");
+    CHECK(has(c3, diag::ModportMemberParent));
 }
 
 TEST_CASE("Interface containing virtual interface infinite loop regress") {
