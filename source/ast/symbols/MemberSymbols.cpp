@@ -264,9 +264,54 @@ static bool isOwnGenerateBlockMember(const HierarchicalReference& ref, const Sco
     for (size_t i = 0; i + 1 < path.size(); i++) {
         if (!isBlock(*path[i].symbol))
             return false;
+        // A block that is not instantiated (`if (P)` with P false in this instance) has no members to connect: the
+        // reference stays a ModportMemberParent error, as it was before K-631a (closing review C1).
+        if (path[i].symbol->kind == SymbolKind::GenerateBlock &&
+            path[i].symbol->as<GenerateBlockSymbol>().isUninstantiated) {
+            return false;
+        }
     }
 
     return path.back().symbol == ref.target;
+}
+
+// SVMake K-631a (closing review C1): a modport expression naming a member of a generate block that is NOT instantiated
+// in this instance (`if (P) begin : g ... end` with P false) binds to a bad expression with no diagnostic -- lookup does
+// not descend into an uninstantiated block (Lookup.cpp) and reports nothing -- so the port silently has no connection.
+// Find such a name (the leftmost component of a dotted name in the expression, resolved in the interface's scope) so a
+// diagnostic can be issued.
+static const Symbol* findUninstantiatedBlockName(const SyntaxNode& node, const ASTContext& context,
+                                                 SourceRange& range) {
+    if (node.kind == SyntaxKind::ScopedName) {
+        const NameSyntax* left = &node.as<ScopedNameSyntax>();
+        while (left->kind == SyntaxKind::ScopedName)
+            left = left->as<ScopedNameSyntax>().left;
+
+        Token id;
+        if (left->kind == SyntaxKind::IdentifierName)
+            id = left->as<IdentifierNameSyntax>().identifier;
+        else if (left->kind == SyntaxKind::IdentifierSelectName)
+            id = left->as<IdentifierSelectNameSyntax>().identifier;
+
+        if (id) {
+            auto sym = Lookup::unqualifiedAt(*context.scope, id.valueText(), context.getLocation(),
+                                             id.range(), LookupFlags::NoUndeclaredError);
+            if (sym && sym->kind == SymbolKind::GenerateBlock &&
+                sym->as<GenerateBlockSymbol>().isUninstantiated) {
+                range = node.sourceRange();
+                return sym;
+            }
+        }
+        return nullptr;
+    }
+
+    for (size_t i = 0; i < node.getChildCount(); i++) {
+        if (auto child = node.childNode(i)) {
+            if (auto found = findUninstantiatedBlockName(*child, context, range))
+                return found;
+        }
+    }
+    return nullptr;
 }
 
 ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext,
@@ -294,6 +339,15 @@ ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext
     result->explicitConnection = &expr;
     result->connExpr = &expr;
     result->setType(*expr.type);
+
+    if (expr.bad()) {
+        SourceRange range;
+        if (auto block = findUninstantiatedBlockName(*syntax.expr, context, range)) {
+            auto& diag = context.addDiag(diag::ModportUninstantiatedBlock, range);
+            diag << block->name;
+            diag.addNote(diag::NoteDeclarationHere, block->location);
+        }
+    }
 
     if (expr.bad() ||
         !Expression::checkConnectionDirection(expr, direction, context, result->location)) {

@@ -1161,10 +1161,10 @@ TEST_CASE("SVMake K-631a: generate block names that stay errors in a modport exp
         return std::find(cs.begin(), cs.end(), code) != cs.end();
     };
 
-    // An uninstantiated `if (0)` block: the lookup into it fails (Lookup.cpp refuses to descend into an
-    // uninstantiated generate block), so the port has no connection and an error type.
-    {
-        auto tree = SyntaxTree::fromText(R"(
+    // A generate block that is not instantiated in THIS instance: the lookup into it fails silently (Lookup.cpp), so
+    // the modport names it by ModportUninstantiatedBlock (closing review C1) -- a literal `if (0)`, and an `if (P)` in
+    // the instance where P is 0 while another instance (P = 1) connects.
+    auto c1 = codes(R"(
 interface holder;
     if (0) begin : g
         logic [7:0] gv;
@@ -1173,14 +1173,28 @@ interface holder;
 endinterface
 module top; holder h(); endmodule
 )");
-        Compilation compilation;
-        compilation.addSyntaxTree(tree);
-        auto& top = compilation.getRoot().lookupName<InstanceSymbol>("top");
-        auto& h = top.body.find<InstanceSymbol>("h");
-        auto& q = h.body.find<ModportSymbol>("mp").find<ModportPortSymbol>("q");
-        CHECK(q.getType().isError());
-        CHECK((!q.explicitConnection || q.explicitConnection->bad()));
-    }
+    CHECK(has(c1, diag::ModportUninstantiatedBlock));
+
+    auto c1b = codes(R"(
+interface gif #(parameter int P = 1);
+    if (P) begin : g
+        logic [7:0] gx;
+    end
+    modport mg(input .p(g.gx), output .w(g.gx));
+endinterface
+module cons(gif.mg m);
+    logic [7:0] r;
+    assign r = m.p;
+endmodule
+module top;
+    gif #(0) i0();
+    gif #(1) i1();
+    cons c0(.m(i0.mg));
+    cons c1(.m(i1.mg));
+endmodule
+)");
+    CHECK(std::count(c1b.begin(), c1b.end(), diag::ModportUninstantiatedBlock) == 2);   // .p and .w of i0 only
+    CHECK(!has(c1b, diag::ModportMemberParent));
 
     // A generate block of ANOTHER scope (the enclosing module), reached upward.
     auto c2 = codes(R"(
