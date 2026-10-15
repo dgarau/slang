@@ -105,6 +105,7 @@ public:
             return nullptr;
 
         TypePrinter printer;
+        printer.options.typenameClassNames = true; // SVMake K-558/K-724
         printer.append(*args[0]->type);
 
         return printer.toString();

@@ -1079,6 +1079,60 @@ endmodule
     NO_SESSION_ERRORS;
 }
 
+TEST_CASE("SVMake K-558/K-724: $typename of a class carries the class keyword and its scope (20.6.1 f)") {
+    // PROVISIONAL spelling: the keyword and the prefix are what both voting tools print (round-8 probe
+    // typename_class_r8: Questa `class t/Cls`, VCS `class t.Cls`); the separator follows VCS and the clause's `top.`.
+    ScriptSession session;
+    session.eval(R"(
+class Cls2; endclass
+package P;
+    class PCls; endclass
+    class PGen #(type T = int); T x; endclass
+endpackage
+module top;
+    class Cls; int m; class Inner; endclass endclass
+    typedef struct { int a; Cls h; } s_t;
+    typedef P::PGen#(Cls) pg_t;
+    Cls c;
+    Cls q[$];
+    s_t s;
+    localparam string L1 = $typename(Cls);
+    localparam string L2 = $typename(c);
+    localparam string L3 = $typename(P::PCls);
+    localparam string L4 = $typename(q);
+    localparam string L7 = $typename(Cls::Inner);
+    localparam string L9 = $typename(s);
+    localparam string L5 = $typename(pg_t);
+    localparam string L6 = $typename(Cls2);
+endmodule
+)");
+    const InstanceSymbol* topPtr = nullptr;
+    for (auto inst : session.compilation.getRoot().topInstances) {
+        if (inst->name == "top")
+            topPtr = inst;
+    }
+    REQUIRE(topPtr);
+    auto& top = *topPtr;
+    auto tn = [&](std::string_view name) {
+        return top.body.find<ParameterSymbol>(name).getValue().str();
+    };
+
+    CHECK(tn("L1") == "class top.Cls");
+    CHECK(tn("L2") == "class top.Cls");
+    CHECK(tn("L3") == "class P::PCls");
+    CHECK(tn("L4") == "class top.Cls$[$]");
+    CHECK(tn("L7") == "class top.Cls::Inner");
+    CHECK(tn("L9") == "struct{int a;class top.Cls h;}top.s_t");
+    CHECK(tn("L5") == "class P::PGen#(class top.Cls)");
+    CHECK(tn("L6") == "class Cls2");   // $unit: no prefix, as for a $unit enum (the spelling is open)
+
+    // Nothing else that prints a type changes: toString() keeps the bare name.
+    auto& c = top.body.find<VariableSymbol>("c");
+    CHECK(c.getType().toString() == "Cls");
+
+    NO_SESSION_ERRORS;
+}
+
 TEST_CASE("Identical enums in different compilation units") {
     // It's expected that this should work, even though technically
     // the enums are defined in different compilation units and therefore
