@@ -243,6 +243,32 @@ static bool isOwnNestedInstanceMember(const HierarchicalReference& ref, const Sc
     return path.back().symbol == ref.target;
 }
 
+// SVMake K-631a (K-713): true if `ref` descends only through GENERATE BLOCKS (or elements of generate block arrays)
+// of this interface's own body, ending at the referenced member of the innermost one: `.p(g.x)`, `.p(gl[1].v)`,
+// `.p(g.h.x)`. A generate block is part of the interface instance that contains it (27.3), so its member is a member of
+// the containing interface in the sense of 25.5.4. Accepted 3-1 by Questa, VCS and Riviera-PRO (Xcelium: an
+// implementation gap), SVMake round-8 probe modport_expr_generate_r8. A chain that mixes nested instances and generate
+// blocks is not covered (not probed).
+static bool isOwnGenerateBlockMember(const HierarchicalReference& ref, const Scope* scope) {
+    auto path = ref.path;
+    if (ref.upwardCount != 0 || path.size() < 2)
+        return false;
+
+    auto isBlock = [](const Symbol& sym) {
+        return sym.kind == SymbolKind::GenerateBlock || sym.kind == SymbolKind::GenerateBlockArray;
+    };
+
+    if (!isBlock(*path[0].symbol) || path[0].symbol->getParentScope() != scope)
+        return false;
+
+    for (size_t i = 0; i + 1 < path.size(); i++) {
+        if (!isBlock(*path[i].symbol))
+            return false;
+    }
+
+    return path.back().symbol == ref.target;
+}
+
 ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext,
                                                  ArgumentDirection direction,
                                                  const ModportExplicitPortSyntax& syntax) {
@@ -292,9 +318,14 @@ ModportPortSymbol& ModportPortSymbol::fromSyntax(const ASTContext& parentContext
             // member of the innermost one: `.p(inner.val)`, `.p(ch[0].wr)`, `.p(a.b.c.v)`. Such a
             // name is a member of the containing interface in the sense of 25.5.4 (it is
             // reached through the interface's own nested instances). Upward, `$root`, sibling
-            // and generate-block names stay errors. PROVISIONAL: the LRM is silent here; Questa and
-            // Riviera-PRO accept, Xcelium and VCS report an implementation gap (SVMake round-6 probes).
+            // names, and chains that mix instances and generate blocks stay errors. PROVISIONAL:
+            // the LRM is silent here; Questa and Riviera-PRO accept, Xcelium and VCS report an
+            // implementation gap (SVMake round-6 probes).
             if (isOwnNestedInstanceMember(ref, context.scope))
+                return;
+
+            // SVMake K-631a: a member of the interface's own generate block (`.p(g.x)`).
+            if (isOwnGenerateBlockMember(ref, context.scope))
                 return;
         }
 
