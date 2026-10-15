@@ -2637,6 +2637,31 @@ endfunction
     NO_SESSION_ERRORS;
 }
 
+TEST_CASE("SVMake K-439: a constant pack's with range wider than the value limit is an error, not an allocation") {
+    ScriptSession session;
+    session.eval(R"(
+function automatic int f(int lo, int hi);
+    byte q[$];
+    byte d[$];
+    q = '{1, 2};
+    d = {>>{q with [lo:hi]}};
+    return d.size();
+endfunction
+)");
+    auto cv = session.eval("f(0, 2147483646)");
+    CHECK(cv.bad());
+    auto cv2 = session.eval("f(-1, 2147483646)");
+    CHECK(cv2.bad());
+    // [0:2147483646] exceeds the value limit; [-1:2147483646] is already a range-width overflow (2^31 elements).
+    auto diags = session.getDiagnostics();
+    auto has = [&](DiagCode code) {
+        return std::ranges::any_of(diags, [&](auto& d) { return d.code == code; });
+    };
+    CHECK(has(diag::ConstEvalExceededMaxSize));
+    CHECK(has(diag::RangeWidthOverflow));
+    CHECK(session.eval("f(0, 3)").integer() == 4);   // fill past the extent still works
+}
+
 TEST_CASE("SVMake K-439: the bind-time width of a constant with range -- pack clamped, unpack unchanged") {
     // A SOURCE `q with [-1:1]` is 2 elements wide (the 7.10.1 slice the fold streams); a DESTINATION keeps the range's
     // width, 3, which Bitstream's unpack consumes (K-458).

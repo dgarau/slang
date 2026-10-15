@@ -2356,6 +2356,7 @@ static bool evalPackWithRange(const Expression& withExpr, const Type& arrayType,
         }
         range = {0, range.upper()};
     }
+
     return true;
 }
 
@@ -2587,6 +2588,18 @@ ConstantValue StreamingConcatenationExpression::evalImpl(EvalContext& context) c
                     cv = ConstantValue::Elements();
             }
             else {
+                // SVMake K-439 (closing review M1): the slice is materialized below (filled past the extent), so a
+                // range wider than the evaluator's value limit (--max-constant-size) is ConstEvalExceededMaxSize
+                // rather than an allocation of billions of elements.
+                auto bits = checkedMulU64(
+                    stream.operand->type->getArrayElementType()->getBitstreamWidth(), range.width());
+                if (!bits) {
+                    context.addDiag(diag::ObjectTooLarge, stream.withExpr->sourceRange);
+                    return nullptr;
+                }
+                if (!context.checkBitCount(*bits, stream.withExpr->sourceRange))
+                    return nullptr;
+
                 // If the range expression evaluates to a range greater than the extent of the array
                 // size, the entire array is streamed, and the remaining items are generated using the
                 // nonexistent array entry value
