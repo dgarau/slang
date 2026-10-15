@@ -41,9 +41,19 @@ public:
     bool declaresTimeUnit() const { return unitsRange.has_value(); }
     bool declaresTimePrecision() const { return precisionRange.has_value(); }
 
+    /// SVMake W4-TU (K-595): once the unit's members are added, a unit that declares exactly ONE half of its time
+    /// scale is refused (InvalidInferredTimeScale, as a module is) when the scale it uses (Compilation::getUnitTimeScale)
+    /// has a precision coarser than its unit (3.14).
+    void checkInferredTimeScale();
+
+    /// SVMake W4-TU: a module, program, interface or package declared with no directive in force took this unit's
+    /// DECLARED scale whole (3.14.2.3 c), the missing half default-filled); checkInferredTimeScale checks that pair too.
+    void noteDeclaredScaleInherited() const { declaredScaleInherited = true; }
+
 private:
     // Used for tracking whether a time scale directive is first in scope.
     bool anyMembers = false;
+    mutable bool declaredScaleInherited = false;
     std::optional<SourceRange> unitsRange;
     std::optional<SourceRange> precisionRange;
 };

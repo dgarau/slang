@@ -288,6 +288,9 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
         unit->addMembers(node);
     }
 
+    // SVMake W4-TU (K-595): once, after the unit's members and its first directive are known.
+    unit->checkInferredTimeScale();
+
     syntaxTrees.emplace_back(std::move(tree));
     cachedParseDiagnostics.reset();
 }

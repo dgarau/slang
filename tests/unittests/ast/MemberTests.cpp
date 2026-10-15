@@ -2712,3 +2712,159 @@ endmodule
     CHECK(body("l").getTimeScale() == ts("1ns/1ns"));        // declared under a later directive: THAT directive, not the unit's first
     CHECK(m.body.getTimeScale() == ts("1ns/1ns"));
 }
+
+// SVMake W4-TU (K-595, K-622; David Garau, 2026-10-17, reading E). 3.14: "The time precision of a design element shall be at least as precise
+// as the time unit". slang already refuses an inferred inverted scale for a module, program, interface and package (InvalidInferredTimeScale);
+// a compilation unit that declares ONE half of its scale is checked the same way, on the scale its elements and `$unit` actually use:
+// getUnitTimeScale (the declared half, the other half from the unit's first `timescale directive, else the 1ns built-in -- reading B, c1e,
+// PROVISIONAL). Both halves declared and inverted is InvalidTimeScalePrecision already, so only one diagnostic is issued.
+static std::vector<DiagCode> svmakeUnitScaleDiags(std::string_view text) {
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    std::vector<DiagCode> codes;
+    for (auto& d : compilation.getAllDiagnostics())
+        codes.push_back(d.code);
+    return codes;
+}
+
+TEST_CASE("A partial compilation-unit time scale whose precision is coarser than its unit is refused (SVMake W4-TU, K-595)") {
+    using Codes = std::vector<DiagCode>;
+    const Codes inferred{diag::InvalidInferredTimeScale};
+
+    // K-595: timeunit 100ps alone: the precision is the 1ns default, coarser than the unit
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\nmodule t; endmodule\n") == inferred);
+    // timeprecision 10s alone: the unit is the 1ns default, finer than the precision
+    CHECK(svmakeUnitScaleDiags("timeprecision 10s;\nmodule t; endmodule\n") == inferred);
+    // controls: a finer precision is legal either way
+    CHECK(svmakeUnitScaleDiags("timeunit 10ns;\nmodule t; endmodule\n").empty());
+    CHECK(svmakeUnitScaleDiags("timeprecision 10ps;\nmodule t; endmodule\n").empty());
+    CHECK(svmakeUnitScaleDiags("timeunit 1ns;\nmodule t; endmodule\n").empty());   // equal halves are legal
+
+    // the missing half is the unit's FIRST directive, written before or after the declaration
+    CHECK(svmakeUnitScaleDiags("timeunit 10ns;\n`timescale 1ns/1ps\nmodule t; endmodule\n").empty());
+    CHECK(svmakeUnitScaleDiags("timeunit 10ps;\n`timescale 1ns/1ns\nmodule t; endmodule\n") == inferred);
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\n`timescale 1ns/1ps\nmodule t; endmodule\n").empty());   // review MEDIUM-3
+    CHECK(svmakeUnitScaleDiags("`timescale 1ns/1ps\ntimeunit 100ps;\nmodule t; endmodule\n").empty());   // directive first
+    CHECK(svmakeUnitScaleDiags("`timescale 1ns/1ns\ntimeunit 10ps;\nmodule t; endmodule\n") == inferred);
+
+    // K-622 (review HIGH-2): timeprecision 1ns with a 1ps/1ps directive is a 1ps / 1ns unit scale
+    CHECK(svmakeUnitScaleDiags("timeprecision 1ns;\n`timescale 1ps/1ps\nclass C; endclass\nmodule t; endmodule\n") == inferred);
+
+    // review MEDIUM-1: these two verdicts rest on reading B's merge, which takes the UNIT half from the directive when only timeprecision is
+    // declared. 3.14.2.3 read literally ("The time unit of the compilation-unit scope can only be set by a timeunit declaration") gives the
+    // default unit and the opposite verdicts (1ns / 10ps legal; 1ns / 10s illegal). PROVISIONAL with the merge (K-595, round-9 probe).
+    CHECK(svmakeUnitScaleDiags("`timescale 1ps/1ps\ntimeprecision 10ps;\nmodule t; endmodule\n") == inferred);
+    CHECK(svmakeUnitScaleDiags("`timescale 100s/1s\ntimeprecision 10s;\nmodule t; endmodule\n").empty());
+
+    // review MEDIUM-2: both halves declared and inverted: the existing diagnostic, once, and not a second one
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\ntimeprecision 1ns;\nmodule t; endmodule\n") ==
+          Codes{diag::InvalidTimeScalePrecision});
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps / 1ns;\nmodule t; endmodule\n") == Codes{diag::InvalidTimeScalePrecision});
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\ntimeprecision 1ps;\n`timescale 1ns/1ns\nmodule t; endmodule\n").empty());
+
+    // the diagnostic sits on the declared half and names the scale in use
+    {
+        auto tree = SyntaxTree::fromText("timeunit 10ps;\n`timescale 1ns/1ns\nmodule t; endmodule\n");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        auto& diags = compilation.getAllDiagnostics();
+        REQUIRE(diags.size() == 1);
+        CHECK(diags[0].code == diag::InvalidInferredTimeScale);
+        CHECK(diags[0].location.offset() == std::string_view("timeunit ").size());
+        CHECK(diags[0].args.size() == 1);
+    }
+}
+
+TEST_CASE("Every reader of a partially declared unit's scale sees the merged value the check sees (SVMake W4-TU, review HIGH-1)") {
+    auto ts = [](std::string_view str) { return TimeScale::fromString(str).value(); };
+    // a class and a function declared BEFORE the unit's first directive: they used to take the declared half with the other half
+    // default-filled (100ps / 1ns, inverted, never checked) while `$unit` named 100ps / 1ps
+    auto tree = SyntaxTree::fromText(R"(
+timeunit 100ps;
+class C;
+    task go(); endtask
+endclass
+function automatic void f(); endfunction
+`timescale 1ns/1ps
+class D; endclass
+module t; endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    auto& unit = *compilation.getCompilationUnits()[0];
+    CHECK(compilation.getUnitTimeScale(unit) == ts("100ps/1ps"));
+    CHECK(unit.find<ClassType>("C").getTimeScale() == ts("100ps/1ps"));
+    CHECK(unit.find<ClassType>("C").find<SubroutineSymbol>("go").getTimeScale() == ts("100ps/1ps"));
+    CHECK(unit.find<SubroutineSymbol>("f").getTimeScale() == ts("100ps/1ps"));
+    CHECK(unit.find<ClassType>("D").getTimeScale() == ts("100ps/1ps"));
+    CHECK(compilation.getRoot().topInstances[0]->body.getTimeScale() == ts("1ns/1ps"));   // 3.14.2.3 b): the directive in force
+
+    // a module and a package before the first directive take the unit's DECLARED pair (3.14.2.3 c), upstream's answer, unchanged:
+    // the declared half, the other the default. That pair is checked too: legal here (10ns / 1ns) ...
+    auto treeM = SyntaxTree::fromText(R"(
+timeunit 10ns;
+module early; endmodule
+package pk; endpackage
+`timescale 1ns/1ps
+module t; endmodule
+)");
+    Compilation compilationM;
+    compilationM.addSyntaxTree(treeM);
+    NO_COMPILATION_ERRORS;
+    CHECK(compilationM.getUnitTimeScale(*compilationM.getCompilationUnits()[0]) == ts("10ns/1ps"));
+    CHECK(compilationM.getPackage("pk")->getTimeScale() == ts("10ns/1ns"));
+    for (auto inst : compilationM.getRoot().topInstances)
+        CHECK(inst->body.getTimeScale() == ts(inst->name == "early" ? "10ns/1ns" : "1ns/1ps"));
+
+    // ... and refused when it is inverted, although the unit's own merged scale (100ps / 1ps) is legal
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\nmodule early; endmodule\n`timescale 1ns/1ps\nmodule t; endmodule\n") ==
+          std::vector<DiagCode>{diag::InvalidInferredTimeScale});
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\npackage pk; endpackage\n`timescale 1ns/1ps\nmodule t; endmodule\n") ==
+          std::vector<DiagCode>{diag::InvalidInferredTimeScale});
+    // a module declaring its own other half is checked as its own scope (upstream), not through the unit
+    CHECK(svmakeUnitScaleDiags("timeunit 100ps;\nmodule early; timeprecision 1ps; endmodule\n`timescale 1ns/1ps\nmodule t; endmodule\n").empty());
+
+    // timeprecision declared, the unit half from a later directive (reading B)
+    auto tree2 = SyntaxTree::fromText(R"(
+timeprecision 1ps;
+class C; endclass
+`timescale 1us/1ns
+module t; endmodule
+)");
+    Compilation compilation2;
+    compilation2.addSyntaxTree(tree2);
+    NO_COMPILATION_ERRORS;
+    auto& unit2 = *compilation2.getCompilationUnits()[0];
+    CHECK(compilation2.getUnitTimeScale(unit2) == ts("1us/1ps"));
+    CHECK(unit2.find<ClassType>("C").getTimeScale() == ts("1us/1ps"));
+
+    // the inverted shape is refused whichever reader would have used it
+    auto tree3 = SyntaxTree::fromText(R"(
+timeunit 10ps;
+class C; endclass
+`timescale 1ns/1ns
+module t; endmodule
+)");
+    Compilation compilation3;
+    compilation3.addSyntaxTree(tree3);
+    auto& diags = compilation3.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::InvalidInferredTimeScale);
+    auto c3 = compilation3.getCompilationUnits()[0]->find<ClassType>("C").getTimeScale();
+    REQUIRE(c3);
+    CHECK(c3->base == ts("10ps/10ps").base);   // 10ps / 1ns: TimeScale::fromString refuses an inverted pair
+    CHECK(c3->precision == ts("1ns/1ns").precision);
+
+    // a unit that declares nothing: unchanged (R1: an element before any directive has no scale of its own)
+    auto tree4 = SyntaxTree::fromText(R"(
+class C; endclass
+`timescale 1ns/1ps
+module t; endmodule
+)");
+    Compilation compilation4;
+    compilation4.addSyntaxTree(tree4);
+    NO_COMPILATION_ERRORS;
+    CHECK(!compilation4.getCompilationUnits()[0]->find<ClassType>("C").getTimeScale());
+}
