@@ -275,32 +275,90 @@ static bool isOwnGenerateBlockMember(const HierarchicalReference& ref, const Sco
     return path.back().symbol == ref.target;
 }
 
-// SVMake K-631a (closing review C1): a modport expression naming a member of a generate block that is NOT instantiated
-// in this instance (`if (P) begin : g ... end` with P false) binds to a bad expression with no diagnostic -- lookup does
-// not descend into an uninstantiated block (Lookup.cpp) and reports nothing -- so the port silently has no connection.
-// Find such a name (the leftmost component of a dotted name in the expression, resolved in the interface's scope) so a
-// diagnostic can be issued.
+// SVMake K-631a (closing review C1, re-check H1): a modport expression naming a member of a generate block that is NOT
+// instantiated in this instance (`if (P) begin : g ... end` with P false, at ANY depth: `g.h.x`, `gl[0].z.zx`) binds to a
+// bad expression with no diagnostic -- lookup does not descend into an uninstantiated block (Lookup.cpp) and reports
+// nothing -- so the port silently has no connection. Walk every component of each dotted name in the expression from
+// the interface's scope (a generate block array by its constant index, an instance through its body) and return the
+// first uninstantiated generate block on the way.
+static const Symbol* uninstantiatedBlockOnPath(const ScopedNameSyntax& scoped, const ASTContext& context) {
+    SmallVector<const NameSyntax*> parts;
+    const NameSyntax* walk = &scoped;
+    while (walk->kind == SyntaxKind::ScopedName) {
+        parts.push_back(walk->as<ScopedNameSyntax>().right);
+        walk = walk->as<ScopedNameSyntax>().left;
+    }
+    parts.push_back(walk);
+    std::ranges::reverse(parts);
+
+    auto nameOf = [](const NameSyntax& name, std::span<const ElementSelectSyntax* const>* selects) -> Token {
+        if (name.kind == SyntaxKind::IdentifierName)
+            return name.as<IdentifierNameSyntax>().identifier;
+        if (name.kind == SyntaxKind::IdentifierSelectName) {
+            auto& sel = name.as<IdentifierSelectNameSyntax>();
+            if (selects)
+                *selects = std::span<const ElementSelectSyntax* const>(sel.selectors.begin(),
+                                                                       sel.selectors.end());
+            return sel.identifier;
+        }
+        return Token();
+    };
+
+    const Symbol* sym = nullptr;
+    for (size_t i = 0; i < parts.size(); i++) {
+        std::span<const ElementSelectSyntax* const> selects;
+        Token id = nameOf(*parts[i], &selects);
+        if (!id)
+            return nullptr;
+
+        if (i == 0) {
+            sym = Lookup::unqualifiedAt(*context.scope, id.valueText(), context.getLocation(),
+                                        id.range(), LookupFlags::NoUndeclaredError);
+        }
+        else {
+            const Scope* scope = nullptr;
+            if (sym->kind == SymbolKind::Instance)
+                scope = &sym->as<InstanceSymbol>().body;
+            else if (sym->kind == SymbolKind::GenerateBlock)
+                scope = &sym->as<GenerateBlockSymbol>();
+            if (!scope)
+                return nullptr;
+            sym = scope->find(id.valueText());
+        }
+        if (!sym)
+            return nullptr;
+
+        // A generate block array: take the element the (constant) index names.
+        for (auto select : selects) {
+            if (sym->kind != SymbolKind::GenerateBlockArray || !select->selector ||
+                select->selector->kind != SyntaxKind::BitSelect) {
+                return nullptr;
+            }
+            auto index = context.evalInteger(*select->selector->as<BitSelectSyntax>().expr);
+            if (!index)
+                return nullptr;
+            const Symbol* element = nullptr;
+            for (auto entry : sym->as<GenerateBlockArraySymbol>().entries) {
+                if (auto ai = entry->getArrayIndex(); ai && ai->as<int32_t>() == *index)
+                    element = entry;
+            }
+            if (!element)
+                return nullptr;
+            sym = element;
+        }
+
+        if (sym->kind == SymbolKind::GenerateBlock && sym->as<GenerateBlockSymbol>().isUninstantiated)
+            return sym;
+    }
+    return nullptr;
+}
+
 static const Symbol* findUninstantiatedBlockName(const SyntaxNode& node, const ASTContext& context,
                                                  SourceRange& range) {
     if (node.kind == SyntaxKind::ScopedName) {
-        const NameSyntax* left = &node.as<ScopedNameSyntax>();
-        while (left->kind == SyntaxKind::ScopedName)
-            left = left->as<ScopedNameSyntax>().left;
-
-        Token id;
-        if (left->kind == SyntaxKind::IdentifierName)
-            id = left->as<IdentifierNameSyntax>().identifier;
-        else if (left->kind == SyntaxKind::IdentifierSelectName)
-            id = left->as<IdentifierSelectNameSyntax>().identifier;
-
-        if (id) {
-            auto sym = Lookup::unqualifiedAt(*context.scope, id.valueText(), context.getLocation(),
-                                             id.range(), LookupFlags::NoUndeclaredError);
-            if (sym && sym->kind == SymbolKind::GenerateBlock &&
-                sym->as<GenerateBlockSymbol>().isUninstantiated) {
-                range = node.sourceRange();
-                return sym;
-            }
+        if (auto found = uninstantiatedBlockOnPath(node.as<ScopedNameSyntax>(), context)) {
+            range = node.sourceRange();
+            return found;
         }
         return nullptr;
     }
