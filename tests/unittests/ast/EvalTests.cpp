@@ -6,6 +6,7 @@
 #include <cmath>
 using Catch::Approx;
 
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/ScriptSession.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
@@ -2634,6 +2635,35 @@ endfunction
     CHECK(q[1].integer() == "8'shc3"_si);
 
     NO_SESSION_ERRORS;
+}
+
+TEST_CASE("SVMake K-439: the bind-time width of a constant with range -- pack clamped, unpack unchanged") {
+    // A SOURCE `q with [-1:1]` is 2 elements wide (the 7.10.1 slice the fold streams); a DESTINATION keeps the range's
+    // width, 3, which Bitstream's unpack consumes (K-458).
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    byte q[$];
+    logic [31:0] x;
+    initial begin
+        x = {>>{q with [-1:1]}};
+        {>>{q with [-1:1]}} = 24'hA1B2C3;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    std::vector<std::optional<bitwidth_t>> widths;
+    compilation.getRoot().visit(
+        makeVisitor([&](auto& visitor, const StreamingConcatenationExpression& e) {
+            for (auto& stream : e.streams())
+                widths.push_back(stream.constantWithWidth);
+            visitor.visitDefault(e);
+        }));
+    REQUIRE(widths.size() == 2);
+    CHECK(widths[0] == 2u);   // the source
+    CHECK(widths[1] == 3u);   // the destination
 }
 
 TEST_CASE("SVMake K-458: a with range on a multi-dimensional array is refused (11.4.14.4)") {
