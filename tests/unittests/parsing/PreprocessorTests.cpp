@@ -467,6 +467,58 @@ TEST_CASE("Macro stringify whitespace") {
     CHECK_DIAGNOSTICS_EMPTY;
 }
 
+TEST_CASE("Macro stringify after a line continuation or an empty argument") {
+    // IEEE 1800-2023 22.5.1: a `" "indicates that the expansion shall include the quotation mark",
+    // so whitespace before it -- including the whitespace before a previous line's line
+    // continuation, and the trivia of an empty argument -- is outside the string (SVMake UVM-e3b N2).
+    auto& text = R"(
+`define A1(A) \
+  f("[%s]",     \
+`"A`");
+`define A2(A) \
+  f("[%s]",\
+           `"A`");
+`define A3(A) f("[%s]",   `"A`");
+`define A4(E,A) f("[%s]", E`"A`");
+`define A5(A) \
+  f("[%s]", `"x \
+y A`");
+`define A6(A) \
+  f("[%s]", \
+           `"A b`");
+`define A7(A) \
+  f("[%s]", \
+           `" A`");
+`define A8(A) \
+  f("[%s]",     \
+`"A``(``A``)`");
+`A1(da)
+`A2(da)
+`A3(da)
+`A4(,da)
+`A5(da)
+`A6(da)
+`A7(da)
+`A8(da)
+)";
+
+    std::string result = preprocess(text);
+    auto count = [&](std::string_view needle) {
+        size_t n = 0;
+        for (size_t pos = result.find(needle); pos != std::string::npos;
+             pos = result.find(needle, pos + 1))
+            n++;
+        return n;
+    };
+    CHECK(count("\"da\"") == 4);       // A1 (5 spaces before the `\`), A2, A3, A4 (an empty argument)
+    CHECK(count("\"x y da\"") == 1);   // A5: a backslash-newline INSIDE the string stays as it was
+    CHECK(count("\"da b\"") == 1);     // A6
+    CHECK(count("\" da\"") == 1);      // A7: a space typed inside the string is kept, once
+    CHECK(count("\"da(da)\"") == 1);   // A8: UVM's `"ARRAY_TYPE``(``VALUE_TYPE``)`" shape
+    CHECK(count("\" ") == 1);          // no other string starts with a space
+    CHECK_DIAGNOSTICS_EMPTY;
+}
+
 TEST_CASE("Macro stringify useless concatenation") {
     auto& text = "`define FOO(x) `\"``x`\" \n`FOO(a)";
     Token token = lexToken(text);
