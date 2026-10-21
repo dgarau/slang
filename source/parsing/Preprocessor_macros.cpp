@@ -141,6 +141,17 @@ public:
 private:
     void handleStringifyOp(Token token) {
         if (!stringify) {
+            // Trivia still pending from an empty macro argument or a line continuation (the
+            // whitespace before a previous line's `\`) lies lexically BEFORE the `" and so
+            // outside the string: IEEE 1800-2023 22.5.1, the `" "indicates that the expansion
+            // shall include the quotation mark", so the literal starts there. Keep it as the
+            // string token's own leading trivia instead of letting append() attach it to the
+            // first token inside the string (SVMake UVM-e3b N2).
+            if (!emptyArgTrivia.empty()) {
+                emptyArgTrivia.append_range(token.trivia());
+                token = token.withTrivia(pp.alloc, emptyArgTrivia);
+                emptyArgTrivia.clear();
+            }
             stringify = token;
             stringifyBuffer.clear();
 
