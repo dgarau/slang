@@ -902,6 +902,10 @@ bool Type::isValidForDPIReturn() const {
             return true;
         case SymbolKind::PredefinedIntegerType:
             return !isFourState();
+        case SymbolKind::EnumType:
+            // H.7.3: the base type determines whether an enumeration type is a small value (35.5.5,
+            // Annex A footnote 26), and 35.5.6 reads an enum as its base type.
+            return getCanonicalType().as<EnumType>().baseType.isValidForDPIReturn();
         default:
             return false;
     }

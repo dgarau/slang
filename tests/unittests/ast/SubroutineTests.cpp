@@ -247,6 +247,46 @@ endmodule
     CHECK(diags[1].code == diag::InvalidDPIReturnType);
 }
 
+TEST_CASE("DPI enum return type follows its base (H.7.3)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    typedef int unsigned u32_t;
+    typedef enum {A0} e_int_t;
+    typedef e_int_t e_alias_t;
+    import "DPI-C" function e_int_t f1();
+    import "DPI-C" function enum byte unsigned {B0} f2();
+    import "DPI-C" function enum shortint {C0} f3();
+    import "DPI-C" function enum longint {D0} f4();
+    import "DPI-C" function enum int unsigned {E0} f5();
+    import "DPI-C" function enum bit {F0} f6();
+    import "DPI-C" function enum logic {G0} f7();
+    import "DPI-C" function enum reg {H0} f8();
+    import "DPI-C" function enum u32_t {I0} f9();
+    import "DPI-C" function e_alias_t f10();
+
+    function enum byte {J0} x1(); return J0; endfunction
+    export "DPI-C" function x1;
+
+    import "DPI-C" function enum bit [7:0] {K0} r1();
+    import "DPI-C" function enum logic [0:0] {L0} r2();
+    import "DPI-C" function enum logic [31:0] {M0} r3();
+    import "DPI-C" function enum integer {N0} r4();
+    import "DPI-C" function enum time {O0} r5();
+
+    function enum bit [3:0] {P0} x2(); return P0; endfunction
+    export "DPI-C" function x2;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 6);
+    for (auto& diag : diags)
+        CHECK(diag.code == diag::InvalidDPIReturnType);
+}
+
 TEST_CASE("DPI Exports") {
     auto tree = SyntaxTree::fromText(R"(
 function bar; endfunction
