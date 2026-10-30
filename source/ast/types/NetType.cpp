@@ -10,6 +10,7 @@
 #include "slang/ast/ASTContext.h"
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/Compilation.h"
+#include "slang/ast/Lookup.h"
 #include "slang/ast/Scope.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
@@ -116,6 +117,20 @@ const SubroutineSymbol* NetType::getResolutionFunction() const {
                 return *resolver;
             }
         }
+    }
+    else if (declSyntax.type->kind == SyntaxKind::NamedType) {
+        // The second form of a nettype declaration "create[s] another name for an existing
+        // nettype" (IEEE 1800-2023 6.6.7): the alias is the same nettype, so it has the same
+        // resolution function -- that of the nettype it names, which may itself be an alias.
+        // A data type named here (a typedef) is the first form with no resolver.
+        resolver = nullptr; // set before the lookup, so the cache answers any re-entry
+        ASTContext context(*scope, LookupLocation::before(*this), ASTFlags::AllowNetType);
+        LookupResult result;
+        Lookup::name(*declSyntax.type->as<NamedTypeSyntax>().name, context, LookupFlags::Type,
+                     result);
+        if (result.found && result.found->kind == SymbolKind::NetType)
+            resolver = result.found->as<NetType>().getResolutionFunction();
+        return *resolver;
     }
 
     resolver = nullptr;
