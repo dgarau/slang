@@ -1668,3 +1668,47 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::MultipleAlwaysAssigns);
 }
+
+TEST_CASE("A nettype alias keeps the resolution function of the nettype it names (6.6.7)") {
+    auto& code = R"(
+package P;
+    function automatic real sumres(input real d[]);
+        return 0.0;
+    endfunction
+    nettype real sum_n with sumres;
+endpackage
+
+module m;
+    import P::*;
+    nettype sum_n alias_n;
+    nettype alias_n alias2_n;
+    nettype P::sum_n x_n;
+    typedef real real_t;
+    nettype real_t plain_n;
+    nettype plain_n plain_alias_n;
+
+    alias_n a; assign a = 1.5; assign a = 2.5;
+    alias2_n b; assign b = 1.0; assign b = 0.5;
+    x_n c; assign c = 2.0; assign c = 0.25;
+    plain_alias_n d; assign d = 1.0; assign d = 2.0;
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::MultipleUDNTDrivers);
+
+    compilation.unfreeze();
+    auto& root = compilation.getRoot();
+    auto resolver = [&](std::string_view name) {
+        return root.lookupName<NetSymbol>(std::string("m.") + std::string(name)).netType.getResolutionFunction();
+    };
+    auto& sumres = compilation.getPackage("P")->find("sumres")->as<SubroutineSymbol>();
+    CHECK(resolver("a") == &sumres);
+    CHECK(resolver("b") == &sumres);
+    CHECK(resolver("c") == &sumres);
+    CHECK(resolver("d") == nullptr);
+}
