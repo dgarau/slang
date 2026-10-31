@@ -1,0 +1,3 @@
+// A library whose literal file does not exist maps nothing: a warning, not an error (1800-2023 33.3.3).
+library libmiss "does_not_exist.sv", libmod.qv;
+library libnone none*.sv, none_dir/;

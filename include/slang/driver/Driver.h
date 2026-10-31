@@ -540,6 +540,7 @@ private:
     bool reportLoadErrors();
 
     bool anyFailedLoads = false;
+    size_t loadWarningsReported = 0;
 
     std::filesystem::path currentCommandFile;
     flat_hash_set<std::filesystem::path> activeCommandFiles;

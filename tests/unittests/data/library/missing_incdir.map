@@ -1,0 +1,2 @@
+// A missing -incdir directory stays an error: it names a search path, not a file pattern.
+library libinc libmod.qv -incdir "no_such_dir";
