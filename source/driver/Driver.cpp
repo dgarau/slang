@@ -1489,6 +1489,10 @@ void Driver::addLibraryFiles(std::string_view pattern) {
 }
 
 bool Driver::reportLoadErrors() {
+    // Called once after the options and once after the sources load: each warning once.
+    auto warnings = sourceLoader.getWarnings();
+    for (; loadWarningsReported < warnings.size(); ++loadWarningsReported)
+        printWarning(warnings[loadWarningsReported]);
     if (auto errors = sourceLoader.getErrors(); !errors.empty()) {
         for (auto& err : errors)
             printError(err);

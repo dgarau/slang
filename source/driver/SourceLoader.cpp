@@ -504,7 +504,8 @@ SourceLibrary* SourceLoader::getOrAddLibrary(std::string_view name) {
 
 void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& basePath,
                                     bool isLibraryFile, const SourceLibrary* library,
-                                    const UnitEntry* unit, bool expandEnvVars) {
+                                    const UnitEntry* unit, bool expandEnvVars,
+                                    bool unmatchedIsWarning) {
     SmallVector<fs::path> files;
     std::error_code ec;
     auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
@@ -528,6 +529,15 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
     }
 
     if (ec) {
+        // A library map's file path specification is compared against the source files
+        // (IEEE 1800-2023 33.3.3); one that names a file that does not exist maps nothing,
+        // which no clause makes an error. A wildcard that matches nothing is already silent;
+        // a literal file name is warned about, since it is most likely a typo.
+        if (unmatchedIsWarning && ec == std::errc::no_such_file_or_directory) {
+            warnings.emplace_back(fmt::format("library '{}': '{}': {}; the specification maps no file",
+                                              library ? library->name : ""s, pattern, ec.message()));
+            return;
+        }
         addError(pattern, ec);
         return;
     }
@@ -580,7 +590,7 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
         auto spec = getPathFromSpec(*filePath);
         if (!spec.empty()) {
             addFilesInternal(spec, basePath, /* isLibraryFile */ true, library, nullptr,
-                             /* expandEnvVars */ true);
+                             /* expandEnvVars */ true, /* unmatchedIsWarning */ true);
         }
     }
 

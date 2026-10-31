@@ -399,6 +399,61 @@ TEST_CASE("Driver load library maps") {
     CHECK(driver.sourceLoader.getLibraryMaps().size() == 2);
 }
 
+TEST_CASE("Driver library map: a file spec that matches no file is a warning") {
+    auto guard = OS::captureOutput();
+
+    Driver driver;
+    driver.addStandardArgs();
+
+    auto testDir = findTestDir();
+    auto args = fmt::format("testfoo \"{0}test6.sv\" --libmap \"{0}/library/unmatched.map\"", testDir);
+    CHECK(driver.parseCommandLine(args));
+    CHECK(driver.processOptions());
+    CHECK(driver.parseAllSources());
+
+    REQUIRE(driver.sourceLoader.getWarnings().size() == 1);
+    CHECK(driver.sourceLoader.getErrors().empty());
+    auto& warning = driver.sourceLoader.getWarnings()[0];
+    CHECK(contains(warning, "libmiss"));
+    CHECK(contains(warning, "does_not_exist.sv"));
+
+    // The library's other file is still mapped into it.
+    bool sawLibmod = false;
+    auto& sm = driver.sourceManager;
+    for (auto buf : sm.getAllBuffers()) {
+        if (contains(sm.getRawFileName(buf), "libmod.qv")) {
+            auto lib = sm.getLibraryFor(buf);
+            REQUIRE(lib);
+            CHECK(lib->name == "libmiss");
+            sawLibmod = true;
+        }
+    }
+    CHECK(sawLibmod);
+    // Reported once, though the driver reports load problems after the options and after the sources.
+    (void)driver.reportDiagnostics(/* quiet */ false);
+    auto& text = OS::capturedStderr.empty() ? OS::capturedStdout : OS::capturedStderr;
+    auto first = text.find("does_not_exist.sv");
+    REQUIRE(first != std::string::npos);
+    CHECK(text.find("does_not_exist.sv", first + 1) == std::string::npos);
+    CHECK(contains(text, "warning"));
+}
+
+TEST_CASE("Driver library map: a missing -incdir directory is still an error") {
+    auto guard = OS::captureOutput();
+
+    Driver driver;
+    driver.addStandardArgs();
+
+    auto testDir = findTestDir();
+    auto args = fmt::format("testfoo \"{0}test6.sv\" --libmap \"{0}/library/missing_incdir.map\"",
+                            testDir);
+    CHECK(driver.parseCommandLine(args));
+    CHECK(!driver.processOptions());
+    REQUIRE(driver.sourceLoader.getErrors().size() == 1);
+    CHECK(contains(driver.sourceLoader.getErrors()[0], "no_such_dir"));
+    CHECK(driver.sourceLoader.getWarnings().empty());
+}
+
 TEST_CASE("Driver file kind tracking") {
     auto guard = OS::captureOutput();
 

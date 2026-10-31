@@ -168,6 +168,11 @@ public:
     /// Gets the list of errors that have occurred while loading files.
     std::span<const std::string> getErrors() const { return errors; }
 
+    /// Gets the list of warnings that have occurred while loading files: a library map's
+    /// file path specification that matches no file (IEEE 1800-2023 33.3.3 compares the
+    /// specifications against the source files; one that matches none maps nothing).
+    std::span<const std::string> getWarnings() const { return warnings; }
+
     /// Gets a pointer to the source library with the given name, or adds it if
     /// it does not exist. Returns nullptr if @a name is empty.
     SourceLibrary* getOrAddLibrary(std::string_view name);
@@ -248,7 +253,7 @@ private:
 
     void addFilesInternal(std::string_view pattern, const std::filesystem::path& basePath,
                           bool isLibraryFile, const SourceLibrary* library, const UnitEntry* unit,
-                          bool expandEnvVars);
+                          bool expandEnvVars, bool unmatchedIsWarning = false);
     void addLibraryMapsInternal(std::string_view pattern, const std::filesystem::path& basePath,
                                 const Bag& optionBag, bool expandEnvVars,
                                 flat_hash_set<std::filesystem::path>& seenMaps);
@@ -270,6 +275,7 @@ private:
     flat_hash_set<std::string> uniqueExtensions;
     flat_hash_map<BufferID, std::vector<std::string>> bufferWarningOptions;
     std::vector<std::string> errors;
+    std::vector<std::string> warnings;
     SyntaxTreeList libraryMapTrees;
 
     static constexpr int MinFilesForThreading = 4;
