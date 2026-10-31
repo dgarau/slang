@@ -415,6 +415,7 @@ TEST_CASE("Driver library map: a file spec that matches no file is a warning") {
     CHECK(driver.sourceLoader.getErrors().empty());
     auto& warning = driver.sourceLoader.getWarnings()[0];
     CHECK(contains(warning, "libmiss"));
+    CHECK(contains(warning, "unmatched.map"));
     CHECK(contains(warning, "does_not_exist.sv"));
 
     // The library's other file is still mapped into it.

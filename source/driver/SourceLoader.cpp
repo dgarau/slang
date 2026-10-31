@@ -160,7 +160,7 @@ void SourceLoader::addLibraryMapsInternal(std::string_view pattern, const fs::pa
                     break;
                 }
                 case SyntaxKind::LibraryDeclaration:
-                    createLibrary(member->as<LibraryDeclarationSyntax>(), parentPath);
+                    createLibrary(member->as<LibraryDeclarationSyntax>(), parentPath, path);
                     break;
                 default:
                     SLANG_UNREACHABLE;
@@ -534,8 +534,9 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
         // which no clause makes an error. A wildcard that matches nothing is already silent;
         // a literal file name is warned about, since it is most likely a typo.
         if (unmatchedIsWarning && ec == std::errc::no_such_file_or_directory) {
-            warnings.emplace_back(fmt::format("library '{}': '{}': {}; the specification maps no file",
-                                              library ? library->name : ""s, pattern, ec.message()));
+            warnings.emplace_back(fmt::format("library map '{}': library '{}': '{}': {}; the specification maps no file",
+                                              getU8Str(currentLibraryMap), library ? library->name : ""s,
+                                              pattern, ec.message()));
             return;
         }
         addError(pattern, ec);
@@ -580,10 +581,13 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
     }
 }
 
-void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const fs::path& basePath) {
+void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const fs::path& basePath,
+                                 const fs::path& mapFile) {
     auto libName = syntax.name.valueText();
     if (libName.empty())
         return;
+
+    currentLibraryMap = mapFile;
 
     auto library = getOrAddLibrary(libName);
     for (auto filePath : syntax.filePaths) {

@@ -258,7 +258,7 @@ private:
                                 const Bag& optionBag, bool expandEnvVars,
                                 flat_hash_set<std::filesystem::path>& seenMaps);
     void createLibrary(const syntax::LibraryDeclarationSyntax& syntax,
-                       const std::filesystem::path& basePath);
+                       const std::filesystem::path& basePath, const std::filesystem::path& mapFile);
     LoadResult loadAndParse(const FileEntry& fileEntry, const Bag& optionBag,
                             const SourceOptions& srcOptions, uint64_t fileSortKey = UINT64_MAX);
     void addError(const std::filesystem::path& path, std::error_code ec);
@@ -276,6 +276,7 @@ private:
     flat_hash_map<BufferID, std::vector<std::string>> bufferWarningOptions;
     std::vector<std::string> errors;
     std::vector<std::string> warnings;
+    std::filesystem::path currentLibraryMap; // the map whose library is being created, for its warnings
     SyntaxTreeList libraryMapTrees;
 
     static constexpr int MinFilesForThreading = 4;
