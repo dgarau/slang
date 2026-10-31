@@ -1710,6 +1710,12 @@ TEST_CASE("Real conversion functions") {
 
     CHECK(session.eval("$rtoi(123.678)").integer() == 123);
     CHECK(session.eval("$rtoi(50000000000.0)").integer() == -1539607552);
+    CHECK(session.eval("$rtoi(-2.1)").integer() == -2);
+    CHECK(session.eval("$rtoi(-2.9)").integer() == -2);
+    CHECK(session.eval("$rtoi(-50000000000.0)").integer() == 1539607552);
+    CHECK(session.eval("$rtoi(0.0)").integer() == 0);
+    CHECK(session.eval("$rtoi(-0.5)").integer() == 0);
+    CHECK(session.eval("$rtoi(1.0e30)").integer() == 0);
 
     CHECK(session.eval("$itor(123)").real() == 123.0);
     CHECK(session.eval("$itor('x)").real() == 0.0);

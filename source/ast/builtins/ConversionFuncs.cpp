@@ -61,7 +61,9 @@ public:
         if (!val)
             return nullptr;
 
-        return SVInt(32, (uint64_t)val.real(), true);
+        // Truncate toward zero (20.5), keeping the low 32 bits. A cast of a negative real to an unsigned
+        // integer, as this used, is undefined behaviour (UBSan: -2.1 is outside the range of 'unsigned long').
+        return SVInt::fromDouble(32, val.real(), true, /* round */ false);
     }
 };
 
