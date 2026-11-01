@@ -2,11 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "Test.h"
+#include <fstream>
 
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/MemberSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/driver/Driver.h"
+#include "slang/util/OS.h"
+#include "slang/util/ScopeGuard.h"
+#include "slang/util/String.h"
 
 using namespace slang::driver;
 
@@ -1513,6 +1518,55 @@ TEST_CASE("Cells of different kinds with one name in a library map's library sta
     CHECK(std::ranges::find(codes, diag::DuplicateLibraryCell) == codes.end());
 }
 
+TEST_CASE("Cells of different kinds in a library map's library stay an error under "
+          "--allow-lib-module-redef") {
+    // The keep-first shortcut of --allow-lib-module-redef is for -v / -y library files; a
+    // library map's library is not one, whatever the kinds (SVMake FRONT-D065 closing review
+    // LOW-1: it used to keep the module silently).
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}kinds.map\" --top tb --allow-lib-module-redef");
+    auto codes = run.codes();
+    CHECK_FALSE(run.reportOk);
+    CHECK(std::ranges::find(codes, diag::DuplicateDefinition) != codes.end());
+    CHECK(std::ranges::find(codes, diag::DuplicateLibraryCell) == codes.end());
+}
+
+TEST_CASE("Duplicate cells under one wildcard file spec: the lexically last wins (33.3.1)") {
+    // "The last cell encountered" inside one wildcard file specification is the expansion's
+    // order, which is sorted lexically: directory iteration order differs between file systems
+    // (SVMake FRONT-D065 closing review MEDIUM-1). The files are created in an order unlike
+    // their lexical one, so creation order (tmpfs) cannot pass this by chance either.
+    auto guard = OS::captureOutput();
+
+    std::error_code ec;
+    auto root = fs::temp_directory_path(ec);
+    REQUIRE(!ec);
+    root /= fmt::format("slang-dupcell-glob-{}", OS::getpid());
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "src", ec);
+    REQUIRE(!ec);
+    ScopeGuard cleanup([&] { fs::remove_all(root, ec); });
+
+    auto writeFile = [](const fs::path& path, std::string_view text) {
+        std::ofstream out(path);
+        REQUIRE(out.good());
+        out << text;
+    };
+
+    const char* names[] = {"h_m", "h_z", "h_c", "h_x", "h_a", "h_w", "h_e", "h_y", "h_b", "h_d"};
+    for (auto name : names)
+        writeFile(root / "src" / (std::string(name) + ".sv"), "module helper; endmodule\n");
+    writeFile(root / "src" / "tb.sv", "module tb; helper h(); endmodule\n");
+    writeFile(root / "lib.map", "library work \"src/*.sv\";\n");
+
+    DupCellRun run(fmt::format("--libmap \"{}\" --top tb", getU8Str(root / "lib.map")));
+    CHECK(run.reportOk);
+    auto codes = run.codes();
+    CHECK(codes.size() == 9);
+    CHECK(std::ranges::count(codes, diag::DuplicateLibraryCell) == (std::ptrdiff_t)codes.size());
+    CHECK(run.fileOf("tb.h") == "h_z.sv");
+}
+
 TEST_CASE("Duplicate primitive in a library map's library: the last wins, with a warning (33.3.1)") {
     auto guard = OS::captureOutput();
     DupCellRun run("--libmap \"{0}udps.map\" --top ut");
@@ -1520,4 +1574,9 @@ TEST_CASE("Duplicate primitive in a library map's library: the last wins, with a
     auto codes = run.codes();
     REQUIRE(codes.size() == 1);
     CHECK(codes[0] == diag::DuplicateLibraryCell);
+    // udp1.sv is a buffer and udp2.sv an inverter: the instance binds the second.
+    auto& inst = run.compilation->getRoot().lookupName<PrimitiveInstanceSymbol>("ut.u");
+    auto name = std::string(
+        run.compilation->getSourceManager()->getFileName(inst.primitiveType.location));
+    CHECK(std::filesystem::path(name).filename().string() == "udp2.sv");
 }
