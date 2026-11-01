@@ -924,7 +924,31 @@ void Compilation::insertDefinition(Symbol& symbol, const Scope& scope) {
                 auto vSym = *v;
                 auto vLib = vSym->getSourceLibrary();
                 if (vLib == symLib) {
-                    // Duplicate in the same library.
+                    // Duplicate in the same library. In a library a library map declares,
+                    // two cells of one name and kind (module, interface, program or
+                    // primitive alike) are not an error: "the last cell
+                    // encountered shall be written to the library" with a warning
+                    // (IEEE 1800-2023 33.3.1). Inserting the new one ahead of the old (below)
+                    // makes it the one lookups find. The keep-first shortcut further down is
+                    // for -v / -y library files, which a library map's library is not.
+                    auto sameCellKind = [&] {
+                        if (vSym->kind != symbol.kind)
+                            return false;
+                        if (symbol.kind != SymbolKind::Definition)
+                            return true;
+                        return vSym->as<DefinitionSymbol>().definitionKind ==
+                               symbol.as<DefinitionSymbol>().definitionKind;
+                    };
+                    if (symLib && symLib->fromLibraryMap && sameCellKind()) {
+                        if (!warned) {
+                            auto& diag = scope.addDiag(diag::DuplicateLibraryCell, symbol.location);
+                            diag << symbol.name << symLib->name;
+                            diag.addNote(diag::NotePreviousDefinition, vSym->location);
+                            warned = true;
+                        }
+                        continue;
+                    }
+
                     if (hasFlag(CompilationFlags::AllowLibModuleRedefinition)) {
                         // Silently keep the first definition and discard all subsequent ones,
                         // but only when the incoming duplicate comes from a library file.

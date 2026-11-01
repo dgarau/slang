@@ -1416,3 +1416,108 @@ endconfig
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InfoTask);
 }
+
+// SVMake FRONT-D065 (K-1521): IEEE 1800-2023 33.3.1 -- "If multiple cells with the same name map
+// to the same library, then the last cell encountered shall be written to the library ... a
+// warning shall be issued." A library map's library takes the last definition, with a warning;
+// a library no map declares keeps the 3.13 a) error.
+namespace {
+
+struct DupCellRun {
+    std::unique_ptr<Driver> driver;
+    std::unique_ptr<Compilation> compilation;
+    bool reportOk = false;
+
+    explicit DupCellRun(std::string_view argsTail) {
+        driver = std::make_unique<Driver>();
+        driver->addStandardArgs();
+        auto args = fmt::format("testfoo {}", fmt::format(fmt::runtime(argsTail),
+                                                         findTestDir() + "dupcell/"));
+        CHECK(driver->parseCommandLine(args));
+        CHECK(driver->processOptions());
+        CHECK(driver->parseAllSources());
+        compilation = driver->createCompilation();
+        driver->reportCompilation(*compilation, false);
+        reportOk = driver->reportDiagnostics(false);
+    }
+
+    std::vector<DiagCode> codes() const {
+        std::vector<DiagCode> result;
+        for (auto& d : compilation->getAllDiagnostics())
+            result.push_back(d.code);
+        return result;
+    }
+
+    std::string fileOf(std::string_view instPath) const {
+        auto& inst = compilation->getRoot().lookupName<InstanceSymbol>(instPath);
+        auto name = compilation->getSourceManager()->getFileName(
+            inst.getDefinition().location);
+        return std::string(std::filesystem::path(std::string(name)).filename().string());
+    }
+};
+
+} // namespace
+
+TEST_CASE("Duplicate cell in a library map's library: the last wins, with a warning (33.3.1)") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}one.map\" --top tb");
+    CHECK(run.reportOk);
+    auto codes = run.codes();
+    REQUIRE(codes.size() == 1);
+    CHECK(codes[0] == diag::DuplicateLibraryCell);
+    CHECK(run.driver->diagEngine.getSeverity(diag::DuplicateLibraryCell, {}) ==
+          DiagnosticSeverity::Warning);
+    CHECK(run.fileOf("tb.h") == "second.sv");
+}
+
+TEST_CASE("Duplicate cell in a library map's library ignores --allow-lib-module-redef (33.3.1)") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}one.map\" --top tb --allow-lib-module-redef");
+    CHECK(run.reportOk);
+    auto codes = run.codes();
+    REQUIRE(codes.size() == 1);
+    CHECK(codes[0] == diag::DuplicateLibraryCell);
+    CHECK(run.fileOf("tb.h") == "second.sv");
+}
+
+TEST_CASE("Duplicate cell across two library maps declaring one library (33.3.1)") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}a.map\" --libmap \"{0}b.map\" --top a_tb");
+    CHECK(run.reportOk);
+    auto codes = run.codes();
+    REQUIRE(codes.size() == 1);
+    CHECK(codes[0] == diag::DuplicateLibraryCell);
+    CHECK(run.fileOf("a_tb.h") == "helper.sv");
+    auto& inst = run.compilation->getRoot().lookupName<InstanceSymbol>("a_tb.h");
+    auto name = std::string(
+        run.compilation->getSourceManager()->getFileName(inst.getDefinition().location));
+    CHECK(name.find("/b/helper.sv") != std::string::npos);
+}
+
+TEST_CASE("Duplicate module with no library map stays an error (3.13 a)") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("\"{0}first.sv\" \"{0}second.sv\" \"{0}tb.sv\" --top tb");
+    CHECK_FALSE(run.reportOk);
+    auto codes = run.codes();
+    REQUIRE(codes.size() == 1);
+    CHECK(codes[0] == diag::DuplicateDefinition);
+}
+
+TEST_CASE("Cells of different kinds with one name in a library map's library stay an error") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}kinds.map\" --top tb");
+    auto codes = run.codes();
+    // A module and an interface are both definitions: slang's existing duplicate error.
+    CHECK_FALSE(run.reportOk);
+    CHECK(std::ranges::find(codes, diag::DuplicateDefinition) != codes.end());
+    CHECK(std::ranges::find(codes, diag::DuplicateLibraryCell) == codes.end());
+}
+
+TEST_CASE("Duplicate primitive in a library map's library: the last wins, with a warning (33.3.1)") {
+    auto guard = OS::captureOutput();
+    DupCellRun run("--libmap \"{0}udps.map\" --top ut");
+    CHECK(run.reportOk);
+    auto codes = run.codes();
+    REQUIRE(codes.size() == 1);
+    CHECK(codes[0] == diag::DuplicateLibraryCell);
+}

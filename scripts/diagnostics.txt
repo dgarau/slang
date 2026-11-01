@@ -1031,6 +1031,7 @@ error UnnamedGenerateReference "cannot reference unnamed generate block via exte
 warning unknown-sys-name UnknownSystemName "unknown system name '{}'"
 warning dup-import DuplicateImport "duplicate import declaration is redundant"
 warning duplicate-definition DuplicateDefinition "duplicate definition of '{}'"
+warning duplicate-library-cell DuplicateLibraryCell "'{}' is defined again in library '{}': the last definition encountered is used (33.3.1)"
 warning randomize-var-shadow RandomizeConstraintShadow "'{}' in randomize constraint block refers to class member of '{}', but a variable with the same name exists in an enclosing scope; disambiguate with 'local::{}' to reference the enclosing scope variable or 'this.{}' for the class member"
 warning upward-name UpwardHierarchicalName "'{}' is an upward hierarchical name reference"
 
@@ -1305,7 +1306,7 @@ group default = { real-underflow real-overflow vector-overflow int-overflow unco
                   invalid-source-encoding index-oob range-oob range-width-oob expected-protect-arg
                   unknown-protect-keyword expected-protect-keyword nested-protect-begin extra-protect-end
                   protect-arglist unknown-protect-encoding unknown-protect-option invalid-pragma-number
-                  invalid-pragma-viewport duplicate-definition protect-encoding-bytes invalid-encoding-byte
+                  invalid-pragma-viewport duplicate-definition duplicate-library-cell protect-encoding-bytes invalid-encoding-byte
                   raw-protect-eof protected-envelope specify-param dup-timing-path invalid-pulsestyle
                   negative-timing-limit bad-procedural-force duplicate-defparam implicit-port-type-mismatch
                   split-distweight-op dpi-pure-task multibit-edge unknown-sys-name unknown-library

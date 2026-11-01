@@ -158,7 +158,7 @@ TEST_CASE("Directory globbing") {
     globAndCheck(testDir, "system/", GlobMode::Directories, GlobRank::ExactPath, {}, {"system"});
     globAndCheck(testDir, ".../", GlobMode::Directories, GlobRank::Directory, {},
                  {"library", "nested", "system", "data", "libtest", "dirprefix", "dir_a",
-                  "waivers"});
+                  "waivers", "dupcell", "a", "b"});
     globAndCheck(testDir, testDir + "/library/pkg.sv", GlobMode::Directories, GlobRank::ExactPath,
                  make_error_code(std::errc::not_a_directory), {});
 }

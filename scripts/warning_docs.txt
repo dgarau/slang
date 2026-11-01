@@ -1619,6 +1619,18 @@ module a;
 endmodule
 ```
 
+-Wduplicate-library-cell
+Two cells with the same name and kind are mapped to the same library by a library map. IEEE 1800-2023
+33.3.1 uses the last cell encountered and requires a warning, so this is a warning rather than the
+-Wduplicate-definition error that applies to libraries no library map declares.
+```
+// lib.map: library work "first.sv", "second.sv";
+// first.sv
+module helper; endmodule
+// second.sv: this definition is the one used
+module helper; endmodule
+```
+
 -Wspecify-param
 The LRM disallows using parameters inside of specify blocks. Most tools allow this with
 a warning so slang makes it a warning as well.

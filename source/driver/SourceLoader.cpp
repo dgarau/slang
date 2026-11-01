@@ -590,6 +590,7 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
     currentLibraryMap = mapFile;
 
     auto library = getOrAddLibrary(libName);
+    library->fromLibraryMap = true;
     for (auto filePath : syntax.filePaths) {
         auto spec = getPathFromSpec(*filePath);
         if (!spec.empty()) {
