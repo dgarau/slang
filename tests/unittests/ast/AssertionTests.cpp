@@ -1977,3 +1977,46 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+// SVMake FRONT-K1556 (K-1556). A sequence range's min/max order check (SeqRangeMinMax) compared the min bound's
+// optional value even when its constant evaluation had failed, an empty-optional dereference whose garbage value
+// produced a spurious "minimum is greater than maximum" error run to run. A non-constant bound reports only its own
+// error. Build with -D_GLIBCXX_ASSERTIONS (libstdc++) to turn the old dereference into a deterministic abort.
+TEST_CASE("A non-constant sequence range bound reports only its own error, no order check (SVMake K-1556)") {
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit clk, a, b;
+    int n;
+    assert property (@(posedge clk) a |-> b [-> n:2]);
+    assert property (@(posedge clk) a |-> b [= n:2]);
+    assert property (@(posedge clk) a |-> b [* n:2]);
+    assert property (@(posedge clk) a |-> b [-> n:0]);
+    assert property (@(posedge clk) a |-> b [= n:0]);
+    assert property (@(posedge clk) a ##[n:0] b);
+    assert property (@(posedge clk) a |-> b [-> 1:n]);
+    assert property (@(posedge clk) a |-> b [-> 3:1]);
+    assert property (@(posedge clk) a |-> b [-> -1:2]);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    int minMax = 0, positive = 0, other = 0;
+    for (auto& d : diags) {
+        if (d.code == diag::SeqRangeMinMax)
+            minMax++;
+        else if (d.code == diag::ValueMustBePositive)
+            positive++;
+        else
+            other++;
+    }
+
+    // Exactly one order error: the constant [-> 3:1]. Exactly one sign error: [-> -1:2].
+    CHECK(minMax == 1);
+    CHECK(positive == 1);
+    // One "not a constant" error per non-constant bound (seven).
+    CHECK(other == 7);
+    CHECK(diags.size() == 9);
+}

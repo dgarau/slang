@@ -486,10 +486,12 @@ SequenceRange SequenceRange::fromSyntax(const RangeSelectSyntax& syntax, const A
     if (re.type->isUnbounded())
         return range;
 
+    // Either bound's evaluation can fail (a non-constant bound); the order check
+    // compares the two only when both have a value.
     auto r = context.evalInteger(re);
     if (context.requirePositive(r, syntax.right->sourceRange())) {
         range.max = uint32_t(*r);
-        if (*l > *r) {
+        if (l && *l > *r) {
             auto& diag = context.addDiag(diag::SeqRangeMinMax, syntax.left->sourceRange());
             diag << syntax.right->sourceRange();
             diag << *l << *r;
