@@ -949,7 +949,10 @@ void Compilation::insertDefinition(Symbol& symbol, const Scope& scope) {
                         continue;
                     }
 
-                    if (hasFlag(CompilationFlags::AllowLibModuleRedefinition)) {
+                    // Not for a library a library map declares, whatever the kinds: there a
+                    // clash of different kinds reports below, as it does without the flag.
+                    if (hasFlag(CompilationFlags::AllowLibModuleRedefinition) &&
+                        !(symLib && symLib->fromLibraryMap)) {
                         // Silently keep the first definition and discard all subsequent ones,
                         // but only when the incoming duplicate comes from a library file.
                         if (symbol.kind == SymbolKind::Definition) {

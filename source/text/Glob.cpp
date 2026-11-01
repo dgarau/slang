@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "slang/text/Glob.h"
 
+#include <algorithm>
+
 #include "slang/util/FlatMap.h"
 #include "slang/util/OS.h"
 #include "slang/util/String.h"
@@ -240,6 +242,15 @@ SLANG_EXPORT GlobRank svGlob(const fs::path& basePath, std::string_view pattern,
     else {
         rank = svGlobInternal(basePath, getU8Str(patternPath), mode, local, anyWildcards);
     }
+
+    // A wildcard or directory expansion comes back in directory iteration order, which is the
+    // file system's (hash order on ext4, creation order on tmpfs) and differs between machines.
+    // Several callers give that order meaning: a library map's library binds the last cell
+    // encountered (IEEE 1800-2023 33.3.1), files are parsed and maps read in it. Sort the
+    // expansion lexically so every caller sees one order on every machine.
+    std::ranges::sort(local, [](const fs::path& a, const fs::path& b) {
+        return a.native() < b.native();
+    });
 
     // Results paths are always made canonical.
     std::error_code localEc;
