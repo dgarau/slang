@@ -192,6 +192,11 @@ struct SLANG_EXPORT SourceLibrary {
     /// Set to true if this is the default library.
     bool isDefault = false;
 
+    /// Set to true if a library map's `library` statement declares this library
+    /// (IEEE 1800-2023 33.3.1: two cells of one name in such a library are not an
+    /// error -- the last one encountered is used, with a warning).
+    bool fromLibraryMap = false;
+
     /// Default constructor.
     SourceLibrary() = default;
 
