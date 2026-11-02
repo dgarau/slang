@@ -594,6 +594,25 @@ ConstantValue ConversionExpression::convert(EvalContext& context, const Type& fr
         else
             size = 0; // dynamic array use string size
 
+        // [5.9] A string literal assigned to a fixed unpacked array of bytes is the literal's
+        // sequence of 8-bit values, left justified: every character is kept, an escaped "\0"
+        // included. The removal of "\0" characters is [6.16]'s rule for a string *variable*,
+        // which convertToByteArray applies to any integral value; only a bare literal is
+        // [5.9]'s case, so every other implicit-string source keeps that conversion.
+        if (size && expr && value.isInteger()) {
+            auto& peeled = expr->unwrapImplicitConversions();
+            if (peeled.kind == ExpressionKind::StringLiteral) {
+                auto text = peeled.as<StringLiteral>().getValue();
+                ConstantValue::Elements array;
+                array.reserve(size);
+                for (bitwidth_t i = 0; i < size; i++) {
+                    uint64_t ch = i < text.size() ? uint8_t(text[i]) : 0;
+                    array.emplace_back(SVInt(8, ch, isSigned));
+                }
+                return array;
+            }
+        }
+
         return value.convertToByteArray(size, isSigned);
     }
 

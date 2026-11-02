@@ -3484,3 +3484,45 @@ TEST_CASE("sformatf sizes a signed decimal by the digits of 2^n - 1 plus a sign 
     CHECK(session.eval("$sformatf(\"%d\", -4'sd8)"s).str() == " -8");
     CHECK(session.eval("$sformatf(\"%d\", 4'sd5)"s).str() == "  5");
 }
+
+TEST_CASE("A string literal into a fixed unpacked byte array keeps every character, NUL included (SVMake HEAP-h2, K-1582)") {
+    // [5.9]: a string literal is a sequence of 8-bit values, and assigned to an unpacked array of
+    // bytes it is left justified. [6.16]'s removal of "\0" applies to a string variable only.
+    ScriptSession session;
+    session.eval("localparam byte a[0:3] = \"a\\0b\";");
+    CHECK(session.eval("a[0]").integer() == 0x61);
+    CHECK(session.eval("a[1]").integer() == 0);
+    CHECK(session.eval("a[2]").integer() == 0x62);
+    CHECK(session.eval("a[3]").integer() == 0);
+
+    session.eval("localparam byte b[0:4] = \"\\0ab\";");
+    CHECK(session.eval("b[0]").integer() == 0);
+    CHECK(session.eval("b[1]").integer() == 0x61);
+    CHECK(session.eval("b[2]").integer() == 0x62);
+    CHECK(session.eval("b[4]").integer() == 0);
+
+    // A descending range is filled from its left bound; a longer literal loses its right end.
+    session.eval("localparam byte c[3:0] = \"abcdef\";");
+    CHECK(session.eval("c[3]").integer() == 0x61);
+    CHECK(session.eval("c[0]").integer() == 0x64);
+
+    session.eval("localparam byte e[0:1] = \"\";");
+    CHECK(session.eval("e[0]").integer() == 0);
+    CHECK(session.eval("e[1]").integer() == 0);
+
+    session.eval("localparam byte unsigned u[0:1] = \"\\377a\";");
+    CHECK(session.eval("u[0]").integer() == 255);
+    session.eval("localparam byte s[0:1] = \"\\377a\";");
+    CHECK(session.eval("s[0]").integer() == -1);
+
+    // A parameter of that type, read in a constant condition.
+    session.eval("typedef byte ba_t[0:3];");
+    session.eval("localparam ba_t P = \"a\\0b\";");
+    CHECK(session.eval("P[1] == 0").integer() == 1);
+
+    // Not a bare literal: the existing conversion is unchanged.
+    session.eval("localparam byte d[0:2] = 1 ? \"ab\" : \"xyz\";");
+    CHECK(session.eval("d[0]").integer() == 0x61);
+    CHECK(session.eval("d[2]").integer() == 0);
+    NO_SESSION_ERRORS;
+}
