@@ -121,9 +121,14 @@ public:
     /// Returns the BufferID of the source buffer being lexed.
     BufferID getBufferId() const { return bufferId; }
 
-    /// When set to true, '/' is not treated as the start of a comment during trivia
-    /// scanning. Used when parsing library map file paths that may contain /* glob patterns.
-    void setFilePathMode(bool enable) { filePathMode = enable; }
+    /// When set to true, a '/' that continues an unquoted file path is not treated as the
+    /// start of a comment during trivia scanning. Used when parsing library map file paths
+    /// that may contain /* glob patterns. A '/' that begins a token (after trivia, or where
+    /// no path is open) still starts a comment, which library map files allow.
+    void setFilePathMode(bool enable) {
+        filePathMode = enable;
+        filePathOpen = false;
+    }
 
     /// Concatenates two tokens together. This may result in more than one output token
     /// if the right hand token being concatenated ends up splitting and being re-lexed.
@@ -234,6 +239,10 @@ private:
     // When true, '/' is not treated as the start of a comment in trivia scanning.
     // Used when parsing library map file paths that may contain /* glob patterns.
     bool filePathMode = false;
+
+    // In file path mode: the last token lexed may be continued by the next one as part of
+    // the same unquoted path, so a '/' right after it (with no trivia) is a path character.
+    bool filePathOpen = false;
 
     // temporary storage for building arrays of trivia
     SmallVector<Trivia, 32> triviaBuffer;

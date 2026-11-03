@@ -1251,6 +1251,59 @@ TEST_CASE("Library map path with glob wildcard containing /*") {
           std::string_view::npos);
 }
 
+TEST_CASE("Library map comments inside file path lists (SVMake FIELD-a; 33.3.2)") {
+    // A library map allows standard SystemVerilog comments anywhere (IEEE 1800-2023 33.3.2),
+    // including inside a library declaration's file path list, its -incdir list and an include
+    // statement. A / that continues an unquoted path stays a path character.
+    auto tree = SyntaxTree::fromLibraryMapText(R"(
+include /* the shared map */ "shared.map";
+include// no space before this one
+  ./other.map;
+library lib// right after the name
+   // before the first path
+   "./a.sv",// after a comma, no space
+   /* between paths */ "./b.sv", ./c.sv /* after an unquoted path */,
+   $IP_ROOT/*/stub/*.v, x//y.v
+   -incdir // before the include directories
+   ./inc, /* block */ "./inc2"
+   // before the semicolon
+;
+library lib2/*right after the name*/"./d.sv"/*after a quoted path*/;
+)",
+                                                 getSourceManager());
+
+    REQUIRE(tree);
+    diagnostics = tree->diagnostics();
+    CHECK_DIAGNOSTICS_EMPTY;
+
+    auto& libMap = tree->root().as<LibraryMapSyntax>();
+    REQUIRE(libMap.members.size() == 4);
+
+    auto& inc1 = libMap.members[0]->as<LibraryIncludeStatementSyntax>();
+    CHECK(inc1.filePath->path.valueText() == "\"shared.map\"");
+    auto& inc2 = libMap.members[1]->as<LibraryIncludeStatementSyntax>();
+    CHECK(inc2.filePath->path.valueText() == "\"./other.map\"");
+
+    auto& lib = libMap.members[2]->as<LibraryDeclarationSyntax>();
+    CHECK(lib.name.valueText() == "lib");
+    REQUIRE(lib.filePaths.size() == 5);
+    CHECK(lib.filePaths[0]->path.valueText() == "\"./a.sv\"");
+    CHECK(lib.filePaths[1]->path.valueText() == "\"./b.sv\"");
+    CHECK(lib.filePaths[2]->path.valueText() == "\"./c.sv\"");
+    CHECK(lib.filePaths[3]->path.valueText() == "\"$IP_ROOT/*/stub/*.v\"");
+    CHECK(lib.filePaths[4]->path.valueText() == "\"x//y.v\"");
+    REQUIRE(lib.incDirClause);
+    REQUIRE(lib.incDirClause->filePaths.size() == 2);
+    CHECK(lib.incDirClause->filePaths[0]->path.valueText() == "\"./inc\"");
+    CHECK(lib.incDirClause->filePaths[1]->path.valueText() == "\"./inc2\"");
+
+    auto& lib2 = libMap.members[3]->as<LibraryDeclarationSyntax>();
+    CHECK(lib2.name.valueText() == "lib2");
+    REQUIRE(lib2.filePaths.size() == 1);
+    CHECK(lib2.filePaths[0]->path.valueText() == "\"./d.sv\"");
+    CHECK(!lib2.incDirClause);
+}
+
 TEST_CASE("Genblock parsing regress") {
     auto& text = R"(
 module m;
