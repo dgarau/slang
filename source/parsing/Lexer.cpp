@@ -246,6 +246,22 @@ Token Lexer::lex(KeywordVersion keywordVersion) {
     mark();
     Token token = lexToken(keywordVersion);
 
+    // In file path mode, remember whether this token may be continued by the next one
+    // as part of the same unquoted path (see lexTrivia).
+    if (filePathMode) {
+        switch (token.kind) {
+            case TokenKind::Comma:
+            case TokenKind::Semicolon:
+            case TokenKind::StringLiteral:
+            case TokenKind::EndOfFile:
+                filePathOpen = false;
+                break;
+            default:
+                filePathOpen = true;
+                break;
+        }
+    }
+
     if (token.kind != TokenKind::EndOfFile && errorCount > options.maxErrors) {
         // Stop any further lexing by claiming to be at the end of the buffer.
         addDiag(diag::TooManyLexerErrors, currentOffset());
@@ -1241,10 +1257,14 @@ void Lexer::lexTrivia() {
                 scanWhitespace();
                 break;
             case '/':
-                // In file path mode, don't treat / as a comment start. File paths
-                // can contain wildcard sequences like /* that would otherwise be
-                // misidentified as a block comment (e.g. $ROOT/*/subdir/*.v).
-                if (filePathMode)
+                // In file path mode, a / that continues an unquoted path is not a
+                // comment start: file paths can contain wildcard sequences like /*
+                // that would otherwise be misidentified as a block comment (e.g.
+                // $ROOT/*/subdir/*.v). A / that begins a token -- after trivia, or
+                // where no path is open (after the library name, a comma, a
+                // semicolon or a quoted path) -- is standard comment syntax, which
+                // a library map file allows anywhere (IEEE 1800-2023 33.3.2).
+                if (filePathMode && filePathOpen && triviaBuffer.empty())
                     return;
                 switch (peek(1)) {
                     case '/':
