@@ -4035,6 +4035,12 @@ LibraryDeclarationSyntax& Parser::parseLibraryDecl() {
     if (peek(TokenKind::Minus) && peek(1).kind == TokenKind::IncDirKeyword) {
         auto minus = consume();
         auto incDirKeyword = consume();
+
+        // Re-enter file path mode so that the keyword itself does not continue a path:
+        // a '//' or '/*' glued to 'incdir' starts a comment (IEEE 1800-2023 33.3.2), as it
+        // does after the library name (SVMake FIELD-d, K-2000). The parser has not looked
+        // past the keyword yet, so the next token is lexed in the fresh state.
+        getPP().setFilePathMode(true);
         auto incPaths = parseFilePathList();
         incDir = &factory.libraryIncDirClause(minus, incDirKeyword, incPaths);
     }

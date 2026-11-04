@@ -1304,6 +1304,46 @@ library lib2/*right after the name*/"./d.sv"/*after a quoted path*/;
     CHECK(!lib2.incDirClause);
 }
 
+TEST_CASE("Library map comment glued to -incdir (SVMake FIELD-d, K-2000; 33.3.2)") {
+    // A '//' or '/*' right after the incdir keyword starts a comment, as it does after the
+    // library name. 'incdir' inside an unquoted path still continues it (a glob '/*' right
+    // after it is path text), and a glued '/' that does not open a comment begins a path.
+    auto tree = SyntaxTree::fromLibraryMapText(R"(
+library a "./a.sv" -incdir// a comment
+   "./inc1", ./inc2;
+library b "./b.sv" -incdir/* a comment */inc3;
+library c ./sub/incdir/*.sv -incdir/* a comment */"./inc4";
+library d "./d.sv" -incdir/abs/inc;
+)",
+                                                 getSourceManager());
+
+    REQUIRE(tree);
+    diagnostics = tree->diagnostics();
+    CHECK_DIAGNOSTICS_EMPTY;
+
+    auto& libMap = tree->root().as<LibraryMapSyntax>();
+    REQUIRE(libMap.members.size() == 4);
+
+    auto incdirs = [&](size_t index) {
+        std::vector<std::string_view> result;
+        auto& lib = libMap.members[index]->as<LibraryDeclarationSyntax>();
+        if (lib.incDirClause) {
+            for (auto path : lib.incDirClause->filePaths)
+                result.push_back(path->path.valueText());
+        }
+        return result;
+    };
+
+    CHECK(incdirs(0) == std::vector<std::string_view>{"\"./inc1\"", "\"./inc2\""});
+    CHECK(incdirs(1) == std::vector<std::string_view>{"\"inc3\""});
+    CHECK(incdirs(2) == std::vector<std::string_view>{"\"./inc4\""});
+    CHECK(incdirs(3) == std::vector<std::string_view>{"\"/abs/inc\""});
+
+    auto& libC = libMap.members[2]->as<LibraryDeclarationSyntax>();
+    REQUIRE(libC.filePaths.size() == 1);
+    CHECK(libC.filePaths[0]->path.valueText() == "\"./sub/incdir/*.sv\"");
+}
+
 TEST_CASE("Genblock parsing regress") {
     auto& text = R"(
 module m;
