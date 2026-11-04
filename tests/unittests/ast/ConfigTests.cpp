@@ -1299,6 +1299,311 @@ endmodule
     CHECK(diags[0].code == diag::VirtualIfaceConfigRule);
 }
 
+// SVMake FIELD-d (field report 0005): a virtual interface assignment in a config-elaborated
+// design. IEEE 1800-2023 25.9 restricts only the defparam and clause 33 names no restriction
+// for configurations, so the error is kept only where a config rule selected the interface
+// instance itself, or where the instance is bound under a config and holds a nested instance
+// (a virtual interface type's body binds those without the configuration).
+namespace {
+
+struct VifConfigResult {
+    size_t total = 0;
+    size_t vif = 0;
+    size_t nestedNotes = 0;
+    std::vector<SourceRange> ruleNotes;
+};
+
+VifConfigResult vifConfigCheck(std::string_view config, std::string_view source,
+                               std::string_view top = "cfg") {
+    auto tree = SyntaxTree::fromText(std::string(config) + "\n" + std::string(source));
+    CompilationOptions options;
+    options.topModules.emplace(top);
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(tree);
+
+    VifConfigResult result;
+    auto& diags = compilation.getAllDiagnostics();
+    result.total = diags.size();
+    for (auto& diag : diags) {
+        if (diag.code != diag::VirtualIfaceConfigRule)
+            continue;
+        result.vif++;
+        for (auto& note : diag.notes) {
+            if (note.code == diag::NoteVirtualIfaceConfigNested)
+                result.nestedNotes++;
+            if (note.code == diag::NoteConfigRule && !note.ranges.empty())
+                result.ruleNotes.push_back(note.ranges[0]);
+        }
+    }
+    return result;
+}
+
+// Source A: a flat interface; sites in top (three on i, one on ia[1]), in m (u_m.i) and in p
+// (through the interface port, on top.i).
+constexpr std::string_view vifSourceA = R"(
+interface I #(parameter int W = 1);
+    logic [W-1:0] a;
+    modport mp(input a);
+endinterface
+
+module m;
+    I i();
+    virtual I vi;
+    initial vi = i;
+endmodule
+
+module other;
+endmodule
+
+module p(I ip);
+    virtual I v;
+    initial v = ip;
+endmodule
+
+module top;
+    I i();
+    I ia[2]();
+    m u_m();
+    other u_o();
+    p u_p(i);
+    virtual I vi;
+    virtual I.mp vmp;
+    function automatic void put(virtual I v);
+    endfunction
+    initial begin
+        vi = i;
+        vmp = i.mp;
+        put(i);
+        vi = ia[1];
+    end
+endmodule
+)";
+
+// Source N: nested instances; vi = i reaches a directly nested J, vk = k a J in a generate
+// block and an instance array.
+constexpr std::string_view vifSourceN = R"(
+interface J #(parameter int W = 1);
+    logic [W-1:0] a;
+endinterface
+
+interface I2;
+    J j();
+endinterface
+
+interface I3;
+    if (1) begin : g
+        J ja[2]();
+    end
+endinterface
+
+module top;
+    I2 i();
+    I3 k();
+    virtual I2 vi;
+    virtual I3 vk;
+    initial begin
+        vi = i;
+        vk = k;
+    end
+endmodule
+)";
+
+} // namespace
+
+TEST_CASE("Configs with virtual interfaces: no rule selects the interface (SVMake FIELD-d)") {
+    // D1 rule-less.
+    auto r = vifConfigCheck("config cfg; design top; endconfig", vifSourceA);
+    CHECK(r.total == 0);
+
+    // D2 localparam (before the design statement) and a default liblist.
+    r = vifConfigCheck("config cfg; localparam X = 1; design top; default liblist work; endconfig",
+                       vifSourceA);
+    CHECK(r.total == 0);
+
+    // D3 a rule on an unrelated instance.
+    r = vifConfigCheck("config cfg; design top; instance top.u_o liblist work; endconfig",
+                       vifSourceA);
+    CHECK(r.total == 0);
+
+    // D4 a rule on the interface's ancestor: u_m.i inherits the rule's config, but the rule
+    // does not select it.
+    r = vifConfigCheck("config cfg; design top; instance top.u_m liblist work; endconfig",
+                       vifSourceA);
+    CHECK(r.total == 0);
+
+    // D5 a hierarchical config with no rule of its own.
+    r = vifConfigCheck("config cfgm; design m; endconfig\n"
+                       "config cfg; design top; instance top.u_m use cfgm:config; endconfig",
+                       vifSourceA);
+    CHECK(r.total == 0);
+
+    // D18 a flat interface under a default liblist: rule 2 needs a nested instance.
+    r = vifConfigCheck("config cfg; design top; default liblist work; endconfig",
+                       "interface I; logic a; endinterface\n"
+                       "module top; I i(); virtual I vi; initial vi = i; endmodule");
+    CHECK(r.total == 0);
+}
+
+TEST_CASE("Configs with virtual interfaces: a rule selects the interface (SVMake FIELD-d)") {
+    // D6 an instance rule on top.i, the same cell: the three top sites and p's port site.
+    std::string_view cfg6 = "config cfg; design top; instance top.i use I; endconfig";
+    auto r = vifConfigCheck(cfg6, vifSourceA);
+    CHECK(r.vif == 4);
+    CHECK(r.total == 4);
+    REQUIRE(r.ruleNotes.size() == 4);
+    CHECK(r.ruleNotes[0].start().offset() == cfg6.find("instance top.i"));
+
+    // D7 a parameter override on the nested-hierarchy interface u_m.i.
+    r = vifConfigCheck("config cfg; design top; instance top.u_m.i use #(.W(1)); endconfig",
+                       vifSourceA);
+    CHECK(r.vif == 1);
+    CHECK(r.total == 1);
+
+    // D8 a cell rule: every I instance is selected, every site errors.
+    r = vifConfigCheck("config cfg; design top; cell I use I; endconfig", vifSourceA);
+    CHECK(r.vif == 6);
+    CHECK(r.total == 6);
+
+    // D9 an instance rule on an array: every element is selected.
+    r = vifConfigCheck("config cfg; design top; instance top.ia use I; endconfig", vifSourceA);
+    CHECK(r.vif == 1);
+    CHECK(r.total == 1);
+
+    // D10 a liblist-only rule on the instance (kept pending a tool probe).
+    r = vifConfigCheck("config cfg; design top; instance top.i liblist work; endconfig",
+                       vifSourceA);
+    CHECK(r.vif == 4);
+    CHECK(r.total == 4);
+}
+
+TEST_CASE("Configs with virtual interfaces: nested instances (SVMake FIELD-d)") {
+    // D11 a rule on the nested instance; under rule 2 every site whose interface holds an
+    // instance errors, so k errors too.
+    auto r = vifConfigCheck("config cfg; design top; instance top.i.j use #(.W(8)); endconfig",
+                            vifSourceN);
+    CHECK(r.vif == 2);
+    CHECK(r.total == 2);
+    CHECK(r.nestedNotes == 2);
+
+    // D13 a cell rule on the nested cell.
+    r = vifConfigCheck("config cfg; design top; cell J use J; endconfig", vifSourceN);
+    CHECK(r.vif == 2);
+    CHECK(r.total == 2);
+
+    // D14 rule-less: a nested instance under any config is refused (the named false positive).
+    r = vifConfigCheck("config cfg; design top; endconfig", vifSourceN);
+    CHECK(r.vif == 2);
+    CHECK(r.total == 2);
+
+    // D19 no config at all: nothing (rule 2 needs the instance to be bound under a config).
+    auto tree = SyntaxTree::fromText(vifSourceN);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    // D17 depth: J in K in I4.
+    r = vifConfigCheck("config cfg; design top; instance top.x.k.j use #(.W(8)); endconfig", R"(
+interface J #(parameter int W = 1);
+    logic [W-1:0] a;
+endinterface
+interface K;
+    J j();
+endinterface
+interface I4;
+    K k();
+endinterface
+module top;
+    I4 x();
+    virtual I4 vx;
+    initial vx = x;
+endmodule
+)");
+    CHECK(r.vif == 1);
+    CHECK(r.total == 1);
+}
+
+TEST_CASE("Configs with virtual interfaces: two libraries (SVMake FIELD-d)") {
+    auto lib1 = std::make_unique<SourceLibrary>("lib1", 2);
+    auto lib2 = std::make_unique<SourceLibrary>("lib2", 1);
+    auto& sm = SyntaxTree::getDefaultSourceManager();
+
+    auto run = [&](std::string_view config, std::string_view source) {
+        auto tree1 = SyntaxTree::fromText(std::string(config) + "\n" + std::string(source), sm,
+                                          "source", "", {}, lib1.get());
+        auto tree2 = SyntaxTree::fromText(R"(
+interface J #(parameter int W = 1);
+    logic [W+2:0] a;
+endinterface
+)",
+                                          sm, "source", "", {}, lib2.get());
+        CompilationOptions options;
+        options.topModules.emplace("lib1.cfg:config");
+
+        Compilation compilation(options);
+        compilation.addSyntaxTree(tree1);
+        compilation.addSyntaxTree(tree2);
+
+        size_t vif = 0;
+        auto& diags = compilation.getAllDiagnostics();
+        for (auto& diag : diags) {
+            if (diag.code == diag::VirtualIfaceConfigRule)
+                vif++;
+        }
+        return std::pair{vif, diags.size()};
+    };
+
+    // D12 a default liblist that binds the nested J from lib2.
+    auto [vif12, total12] = run("config cfg; design top; default liblist lib2 lib1; endconfig",
+                                vifSourceN);
+    CHECK(vif12 == 2);
+    CHECK(total12 == 2);
+
+    // D16 the fallback shape: rule-less, so i.j falls back to its parent's library (lib1, a
+    // 1-bit J) while the virtual body takes the higher-priority lib2 J (4 bits).
+    auto [vif16, total16] = run("config cfg; design top; endconfig", R"(
+interface J #(parameter int W = 1);
+    logic [W-1:0] a;
+endinterface
+interface I2;
+    J j();
+endinterface
+module top;
+    I2 i();
+    virtual I2 vi;
+    initial vi = i;
+endmodule
+)");
+    CHECK(vif16 == 1);
+    CHECK(total16 == 1);
+}
+
+TEST_CASE("Configs with virtual interfaces: a bound instance (SVMake FIELD-d)") {
+    constexpr std::string_view source = R"(
+interface I;
+    logic [3:0] a;
+endinterface
+module m;
+endmodule
+module top;
+    m u_m();
+    virtual I vb;
+    initial vb = u_m.bi;
+    bind m I bi();
+endmodule
+)";
+
+    // D15a a cell rule selects the bound instance.
+    auto r = vifConfigCheck("config cfg; design top; cell I use I; endconfig", source);
+    CHECK(r.vif == 1);
+    CHECK(r.total == 1);
+    CHECK(r.ruleNotes.size() == 1);
+
+    // D15b rule-less.
+    r = vifConfigCheck("config cfg; design top; endconfig", source);
+    CHECK(r.total == 0);
+}
+
 TEST_CASE("Configs with instance caching") {
     auto tree = SyntaxTree::fromText(R"(
 config cfg1;
