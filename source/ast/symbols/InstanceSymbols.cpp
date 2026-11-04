@@ -54,11 +54,12 @@ public:
     // Must be called at least once prior to creating instances.
     void reset(const DefinitionSymbol& def_, ParameterBuilder& paramBuilder_,
                const ResolvedConfig* resolvedConfig_, const ConfigBlockSymbol* newConfigRoot_,
-               uint32_t instanceDepth_) {
+               const ConfigRule* configRule_, uint32_t instanceDepth_) {
         definition = &def_;
         paramBuilder = &paramBuilder_;
         resolvedConfig = resolvedConfig_;
         newConfigRoot = newConfigRoot_;
+        configRule = configRule_;
         instanceDepth = instanceDepth_;
     }
 
@@ -100,6 +101,7 @@ private:
     const HierarchyOverrideNode* parentOverrideNode = nullptr;
     const ResolvedConfig* resolvedConfig = nullptr;
     const ConfigBlockSymbol* newConfigRoot = nullptr;
+    const ConfigRule* configRule = nullptr;
     const SyntaxNode* overrideSyntax;
     SmallVectorBase<const Symbol*>& implicitNets;
     SmallVector<uint32_t> path;
@@ -123,6 +125,7 @@ private:
             else
                 inst->resolvedConfig = resolvedConfig;
         }
+        inst->configRule = configRule;
 
         return inst;
     }
@@ -389,6 +392,7 @@ InstanceSymbol& InstanceSymbol::createDefault(Compilation& comp, const Definitio
                 rc->liblist = *configRule->liblist;
         }
         result.resolvedConfig = rc;
+        result.configRule = configRule;
     }
 
     return result;
@@ -666,7 +670,7 @@ void InstanceSymbol::fromSyntax(Compilation& comp, const HierarchyInstantiationS
             }
         }
 
-        builder.reset(definition, paramBuilder, localConfig, defResult.configRoot,
+        builder.reset(definition, paramBuilder, localConfig, defResult.configRoot, confRule,
                       instanceDepth + 1);
 
         if (specificInstance) {

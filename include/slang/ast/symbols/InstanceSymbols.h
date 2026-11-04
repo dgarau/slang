@@ -98,6 +98,11 @@ public:
     /// the parent instance's config rule if there is one up the stack.
     const ResolvedConfig* resolvedConfig = nullptr;
 
+    /// The config rule (an instance or cell clause) that selected this instance itself
+    /// when it was bound, if any. Unlike @a resolvedConfig this is not inherited from
+    /// a parent instance.
+    const ConfigRule* configRule = nullptr;
+
     /// The depth of this instance within the design hierarchy.
     uint32_t instanceDepth;
 

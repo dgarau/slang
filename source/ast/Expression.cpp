@@ -1417,6 +1417,37 @@ Expression& Expression::bindSelector(Compilation& compilation, Expression& value
     }
 }
 
+// Finds the first instance nested in a scope of an interface body: directly, inside an
+// instantiated generate block or generate block array, or as an element of an instance
+// array (SVMake FIELD-d).
+static const Symbol* findNestedInstance(const Scope& scope) {
+    for (auto& member : scope.members()) {
+        switch (member.kind) {
+            case SymbolKind::Instance:
+                return &member;
+            case SymbolKind::InstanceArray:
+                if (auto result = findNestedInstance(member.as<InstanceArraySymbol>()))
+                    return result;
+                break;
+            case SymbolKind::GenerateBlock: {
+                auto& block = member.as<GenerateBlockSymbol>();
+                if (!block.isUninstantiated) {
+                    if (auto result = findNestedInstance(block))
+                        return result;
+                }
+                break;
+            }
+            case SymbolKind::GenerateBlockArray:
+                if (auto result = findNestedInstance(member.as<GenerateBlockArraySymbol>()))
+                    return result;
+                break;
+            default:
+                break;
+        }
+    }
+    return nullptr;
+}
+
 static const SyntaxNode* findOverrideNodeSource(const HierarchyOverrideNode& node) {
     // Try to find some concrete syntax node (defparam or bind directive) that
     // caused us to have this override node.
@@ -1584,14 +1615,24 @@ Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
                 diag.addNote(diag::NoteDeclarationHere, source->sourceRange());
         }
 
-        if (iface->parentInstance && iface->parentInstance->resolvedConfig) {
-            auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
-
-            auto rc = iface->parentInstance->resolvedConfig;
-            if (rc->configRule)
-                diag.addNote(diag::NoteConfigRule, rc->configRule->syntax->sourceRange());
-            else
-                diag.addNote(diag::NoteConfigRule, rc->useConfig.location);
+        // IEEE 1800-2023 25.9 restricts only the defparam; clause 33 names no restriction
+        // for configurations (SVMake FIELD-d, field report 0005). Refuse only when a config
+        // rule selected this interface instance itself, or when the instance is bound under
+        // a config and holds a nested instance: a virtual interface type's body binds its
+        // nested instances without the configuration, so it may differ from the instance.
+        if (auto inst = iface->parentInstance) {
+            if (inst->configRule) {
+                auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
+                diag.addNote(diag::NoteConfigRule, inst->configRule->syntax->sourceRange());
+            }
+            else if (inst->resolvedConfig) {
+                if (auto nested = findNestedInstance(*iface)) {
+                    auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
+                    diag.addNote(diag::NoteDeclarationHere, nested->location);
+                    diag.addNote(diag::NoteVirtualIfaceConfigNested,
+                                 inst->resolvedConfig->useConfig.location);
+                }
+            }
         }
     }
 
