@@ -740,6 +740,12 @@ public:
     /// or if it matches an already existing instance returns that one instead.
     const InstanceSymbol& getOrAddVirtualIface(const InstanceSymbol& instance);
 
+    /// Creates the configuration a virtual interface type's body is bound under
+    /// (SVMake FIELD-d2): the design's configuration when every top instance is bound
+    /// under the same config block with the same library list, otherwise nullptr.
+    /// The result's root instance is @a virtualInstance itself.
+    const ResolvedConfig* createVirtualIfaceConfig(const InstanceSymbol& virtualInstance);
+
     /// Adds a set of diagnostics to the compilation's list of semantic diagnostics.
     void addDiagnostics(const Diagnostics& diagnostics);
 
@@ -1121,6 +1127,11 @@ private:
     // A map of instances that have been created by virtual interface type declarations.
     flat_hash_map<InstanceCacheKey, const InstanceSymbol*> virtualIfaceCache;
     std::vector<const InstanceSymbol*> virtualIfaceInstances;
+
+    // The design's configuration for virtual interface bodies (SVMake FIELD-d2),
+    // set from the top definitions before any top instance is created.
+    const ConfigBlockSymbol* virtualIfaceConfigBlock = nullptr;
+    std::span<const SourceLibrary* const> virtualIfaceLiblist;
 
     // A list of assignments via hierarchical reference.
     std::vector<const HierarchicalReference*> hierarchicalAssignments;

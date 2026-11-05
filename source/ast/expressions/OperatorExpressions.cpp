@@ -1974,7 +1974,7 @@ Expression& ConcatenationExpression::fromSyntax(Compilation& comp,
             Expression* arg = nullptr;
             if (isVirtualIface) {
                 arg = tryBindInterfaceRef(context, *argSyntax,
-                                          /* isInterfacePort */ false);
+                                          /* isInterfacePort */ false, &elemType);
             }
 
             if (!arg) {

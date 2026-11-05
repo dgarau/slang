@@ -304,6 +304,12 @@ struct SLANG_EXPORT ResolvedConfig {
     /// The original rule that led to this resolved configuration.
     const ConfigRule* configRule = nullptr;
 
+    /// Set when this configuration binds the body of a virtual interface type
+    /// (SVMake FIELD-d2): its root is the virtual instance itself, no instance-path
+    /// rule applies, and a cell the configuration cannot resolve falls back to the
+    /// lookup without a configuration.
+    bool isVirtualIface = false;
+
     ResolvedConfig(const ConfigBlockSymbol& useConfig, const InstanceSymbol& rootInstance);
 };
 

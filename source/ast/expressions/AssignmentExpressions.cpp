@@ -368,7 +368,7 @@ Expression& AssignmentExpression::fromSyntax(Compilation& compilation,
 
     Expression* rhs = nullptr;
     if (lhs.type->isVirtualInterfaceOrArray())
-        rhs = tryBindInterfaceRef(context, *rightExpr, /* isInterfacePort */ false);
+        rhs = tryBindInterfaceRef(context, *rightExpr, /* isInterfacePort */ false, lhs.type);
 
     if (!rhs) {
         // When LHS is a streaming concatenation which has no explicit type, RHS should be
