@@ -1440,6 +1440,10 @@ static bool isUndecidedConfigRule(const InstanceSymbol& inst) {
     if (rule->useCell.name.empty() || rule->useCell.targetConfig)
         return false;
 
+    // The instantiated name is read off a HierarchyInstantiation parent. An instance created
+    // from fixup syntax (no such parent) reads an empty name, so a same-name use clause on it
+    // counts as a rebinding and is refused: conservative, never a missed rebinding, and left as
+    // is (FIELD-d2 closing review C3, reasoned; no design svmake checks is known to reach it).
     std::string_view instantiated;
     if (auto syntax = inst.getSyntax();
         syntax && syntax->parent && syntax->parent->kind == SyntaxKind::HierarchyInstantiation) {
@@ -1532,7 +1536,11 @@ static const Symbol* findBindingMismatch(const Scope& real, const Scope& virt) {
                                              v->as<GenerateBlockArraySymbol>());
                 break;
             default:
-                // An UninstantiatedDef: a cell one side could not bind.
+                // An UninstantiatedDef: a cell one side could not bind. It counts as a mismatch
+                // even when the other side is an UninstantiatedDef too (the same unknown cell on
+                // both sides). That only arises when an unknown cell is not an error, under
+                // IgnoreUnknownModules or (* maybe_unknown *), which svmake never sets: there the
+                // refusal is conservative, never a missed difference (FIELD-d2 closing review C3).
                 return &*r;
         }
         if (result)

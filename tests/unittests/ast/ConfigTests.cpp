@@ -1864,6 +1864,88 @@ endmodule
     CHECK(ra4.total == 1);
     REQUIRE(ra4.otherCodes.size() == 1);
     CHECK(ra4.otherCodes[0] == diag::BadAssignment);
+
+    // D27 (closing review C2) a liblist rule on the interface instance itself: the real i.j
+    // binds lib2's J by the rule's liblist, the virtual body lib1's (no instance-path rule
+    // reaches it; the parent's library). Not an undecided rule, so R2b refuses it.
+    auto [r27, lib27] = vifTwoLibraries(
+        "config cfg; design top; instance top.i liblist lib2 lib1; endconfig", R"(
+interface J #(parameter int W = 1);
+    logic [W-1:0] a;
+endinterface
+interface I2;
+    J j();
+endinterface
+module top;
+    I2 i();
+    virtual I2 vi;
+    initial vi = i;
+endmodule
+)",
+        {}, "top.vi");
+    CHECK(r27.rule == 0);
+    CHECK(r27.nested == 1);
+    CHECK(r27.nestedBindingNotes == 1);
+    CHECK(r27.nestedRuleNotes == 0);
+    CHECK(r27.total == 1);
+    CHECK(lib27 == "lib1");
+}
+
+TEST_CASE("Configs with virtual interfaces: the fallback picks another cell (SVMake FIELD-d2t)") {
+    // D25b (closing review C1) three libraries: c (highest priority) holds an 8-bit J, a the
+    // design and the config, b a 4-bit J. The design's liblist (a) resolves no J in the virtual
+    // body, so it falls back to the config-less lookup and takes c's J; the instance's own
+    // liblist (a b) binds b's J. R2b refuses vi = i once.
+    auto libC = std::make_unique<SourceLibrary>("c", 1);
+    auto libA = std::make_unique<SourceLibrary>("a", 2);
+    auto libB = std::make_unique<SourceLibrary>("b", 3);
+    auto& sm = SyntaxTree::getDefaultSourceManager();
+    auto treeA = SyntaxTree::fromText(R"(
+config cfg;
+    design a.tb;
+    default liblist a;
+    instance tb.u liblist a b;
+endconfig
+interface I;
+    J j();
+endinterface
+module m;
+    I i();
+    virtual I vi;
+    initial vi = i;
+endmodule
+module tb;
+    m u();
+endmodule
+)",
+                                      sm, "source", "", {}, libA.get());
+    auto treeB = SyntaxTree::fromText("interface J; logic [3:0] a; endinterface\n", sm, "source",
+                                      "", {}, libB.get());
+    auto treeC = SyntaxTree::fromText("interface J; logic [7:0] a; endinterface\n", sm, "source",
+                                      "", {}, libC.get());
+    CompilationOptions options;
+    options.topModules.emplace("a.cfg:config");
+
+    Compilation compilation(options);
+    compilation.addSyntaxTree(treeA);
+    compilation.addSyntaxTree(treeB);
+    compilation.addSyntaxTree(treeC);
+
+    auto r = countVifDiags(compilation.getAllDiagnostics());
+    CHECK(r.rule == 0);
+    CHECK(r.nested == 1);
+    CHECK(r.nestedBindingNotes == 1);
+    CHECK(r.nestedRuleNotes == 0);
+    CHECK(r.total == 1);
+
+    auto& root = compilation.getRoot();
+    auto& real = root.lookupName<InstanceSymbol>("tb.u.i.j");
+    CHECK(real.getDefinition().sourceLibrary.name == "b");
+    auto& var = root.lookupName<VariableSymbol>("tb.u.vi");
+    auto& vit = var.getType().getCanonicalType().as<VirtualInterfaceType>();
+    auto j = vit.iface.body.find("j");
+    REQUIRE(j);
+    CHECK(j->as<InstanceSymbol>().getDefinition().sourceLibrary.name == "c");
 }
 
 TEST_CASE("Configs with virtual interfaces: a bound instance (SVMake FIELD-d2)") {
