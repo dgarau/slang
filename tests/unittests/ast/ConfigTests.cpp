@@ -1794,10 +1794,11 @@ endmodule
     CHECK(r23.total == 0);
 
     // D24 (plan review H2) a config type override on the top names a virtual interface type,
-    // which is created while the top is: its body must still be bound under the configuration.
+    // which is created while the top is: its body must still be bound under the configuration
+    // (lib1's J by the liblist; without the configuration it would take the higher-priority lib2).
     auto [r24, lib24] = vifTwoLibraries(
         "config cfg; design top; instance top use #(.T(virtual I2)); "
-        "default liblist lib2 lib1; endconfig",
+        "default liblist lib1 lib2; endconfig",
         R"(
 interface J #(parameter int W = 1);
     logic [W-1:0] a;
@@ -1817,7 +1818,7 @@ endmodule
 )",
         {}, "top.vi");
     CHECK(r24.total == 0);
-    CHECK(lib24 == "lib2");
+    CHECK(lib24 == "lib1");
 
     // D25 (plan review H3) a cell the design's configuration cannot resolve in the virtual body
     // (J is only in lib2, the top's liblist is lib1) is looked up as without a configuration:
