@@ -578,6 +578,33 @@ const RootSymbol& Compilation::getRoot(bool skipDefParamsAndBinds) {
         }
     }
 
+    // SVMake FIELD-d2: a virtual interface type's body is bound under the design's
+    // configuration, so its nested instances bind as the configuration binds them by
+    // default. Taken from the top definitions BEFORE any top is created: creating a top
+    // can resolve a config type override that names a virtual interface type.
+    if (!topDefs.empty()) {
+        auto liblistOf = [](const DefinitionLookupResult& r) {
+            if (r.configRule && r.configRule->liblist)
+                return *r.configRule->liblist;
+            return r.configRoot->getDefaultLiblist();
+        };
+
+        bool same = true;
+        auto& first = topDefs[0].first;
+        for (auto& [result, _] : topDefs) {
+            if (!result.configRoot || result.configRoot != first.configRoot ||
+                !std::ranges::equal(liblistOf(result), liblistOf(first))) {
+                same = false;
+                break;
+            }
+        }
+
+        if (same) {
+            virtualIfaceConfigBlock = first.configRoot;
+            virtualIfaceLiblist = liblistOf(first);
+        }
+    }
+
     SmallVector<const InstanceSymbol*> topList;
     for (auto [result, _] : topDefs) {
         auto& def = result.definition->as<DefinitionSymbol>();
@@ -656,8 +683,17 @@ Compilation::DefinitionLookupResult Compilation::tryGetDefinition(std::string_vi
     }
 
     auto& defList = it->second.first;
-    if (resolvedConfig)
-        return resolveConfigRules(lookupName, scope, resolvedConfig, nullptr, defList).first;
+    if (resolvedConfig) {
+        auto result = resolveConfigRules(lookupName, scope, resolvedConfig, nullptr, defList).first;
+
+        // SVMake FIELD-d2: in a virtual interface body, a cell the design's configuration
+        // cannot resolve is looked up as without a configuration rather than raising an error
+        // the design itself does not have (the instance it stands for may be bound through a
+        // rule's own liblist); an assignment whose instance binds it otherwise is refused by
+        // VirtualIfaceConfigNested.
+        if (result.definition || !resolvedConfig->isVirtualIface)
+            return result;
+    }
 
     // If there is a global priority list try to use that.
     for (auto lib : defaultLiblist) {
@@ -1522,6 +1558,16 @@ const InstanceSymbol& Compilation::getOrAddVirtualIface(const InstanceSymbol& sy
         virtualIfaceInstances.push_back(it->second);
 
     return *it->second;
+}
+
+const ResolvedConfig* Compilation::createVirtualIfaceConfig(const InstanceSymbol& virtualInstance) {
+    if (!virtualIfaceConfigBlock)
+        return nullptr;
+
+    auto rc = emplace<ResolvedConfig>(*virtualIfaceConfigBlock, virtualInstance);
+    rc->liblist = virtualIfaceLiblist;
+    rc->isVirtualIface = true;
+    return rc;
 }
 
 const Expression* Compilation::getDefaultDisable(const Scope& scope) const {

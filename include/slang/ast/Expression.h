@@ -176,10 +176,13 @@ public:
                                           const ASTContext& context);
 
     /// Tries to bind an interface reference into an expression for an interface port
-    /// or a virtual interface assignment.
+    /// or a virtual interface assignment. @a targetType is the virtual interface type
+    /// (or array of them) being assigned, when the caller knows it: an instance bound
+    /// under a configuration is then compared with that type's body (SVMake FIELD-d2).
     /// Returns nullptr if unable to do so.
     static Expression* tryBindInterfaceRef(const ASTContext& context,
-                                           const ExpressionSyntax& syntax, bool isInterfacePort);
+                                           const ExpressionSyntax& syntax, bool isInterfacePort,
+                                           const Type* targetType = nullptr);
 
     /// Specialized method for creating all of the expressions in a set membership check.
     /// This is used for case statements and the 'inside' operator.

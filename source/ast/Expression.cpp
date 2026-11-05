@@ -328,7 +328,7 @@ const Expression& Expression::bindRValue(const Type& lhs, const ExpressionSyntax
 
     ASTContext ctx = context.resetFlags(extraFlags);
     if (lhs.isVirtualInterfaceOrArray()) {
-        if (auto ref = tryBindInterfaceRef(ctx, rhs, /* isInterfacePort */ false)) {
+        if (auto ref = tryBindInterfaceRef(ctx, rhs, /* isInterfacePort */ false, &lhs)) {
             if (!assignmentRange.start())
                 assignmentRange = ref->sourceRange;
             return convertAssignment(ctx, lhs, *ref, assignmentRange);
@@ -1417,35 +1417,144 @@ Expression& Expression::bindSelector(Compilation& compilation, Expression& value
     }
 }
 
-// Finds the first instance nested in a scope of an interface body: directly, inside an
-// instantiated generate block or generate block array, or as an element of an instance
-// array (SVMake FIELD-d).
-static const Symbol* findNestedInstance(const Scope& scope) {
+// SVMake FIELD-d2 (field report 0005, probe round 18): a configuration does not restrict
+// assigning an interface instance to a virtual interface (IEEE 1800-2023 25.9 restricts only
+// the defparam; clause 33 names nothing), and the virtual interface sees the instance's
+// configured hierarchy. Three refusals remain, each by name:
+// - a config rule that overrides parameters of, or rebinds to another cell, the interface
+//   instance (VirtualIfaceConfigRule) or an instance nested in it (VirtualIfaceConfigNested):
+//   round 18 left those rows undecided;
+// - an instance in the hierarchy that the configuration binds to another definition or other
+//   parameters than the virtual interface type's body does (VirtualIfaceConfigNested): the
+//   one body of a virtual interface type is bound under the design's configuration by default
+//   (Compilation::createVirtualIfaceConfig), which a rule below the top can change.
+
+// A config rule round 18 did not decide: one that overrides parameters, or whose use clause
+// names a cell other than the one instantiated.
+static bool isUndecidedConfigRule(const InstanceSymbol& inst) {
+    auto rule = inst.configRule;
+    if (!rule)
+        return false;
+    if (rule->paramOverrides)
+        return true;
+    if (rule->useCell.name.empty() || rule->useCell.targetConfig)
+        return false;
+
+    std::string_view instantiated;
+    if (auto syntax = inst.getSyntax();
+        syntax && syntax->parent && syntax->parent->kind == SyntaxKind::HierarchyInstantiation) {
+        instantiated = syntax->parent->as<HierarchyInstantiationSyntax>().type.valueText();
+    }
+    return rule->useCell.name != instantiated;
+}
+
+// The first instance nested in an interface body, at any depth (through instance arrays,
+// instantiated generate blocks and generate block arrays), that a rule of that kind selected.
+static const InstanceSymbol* findUndecidedNestedRule(const Scope& scope) {
     for (auto& member : scope.members()) {
+        const InstanceSymbol* result = nullptr;
         switch (member.kind) {
-            case SymbolKind::Instance:
-                return &member;
-            case SymbolKind::InstanceArray:
-                if (auto result = findNestedInstance(member.as<InstanceArraySymbol>()))
-                    return result;
-                break;
-            case SymbolKind::GenerateBlock: {
-                auto& block = member.as<GenerateBlockSymbol>();
-                if (!block.isUninstantiated) {
-                    if (auto result = findNestedInstance(block))
-                        return result;
-                }
+            case SymbolKind::Instance: {
+                auto& inst = member.as<InstanceSymbol>();
+                result = isUndecidedConfigRule(inst) ? &inst : findUndecidedNestedRule(inst.body);
                 break;
             }
+            case SymbolKind::InstanceArray:
+                result = findUndecidedNestedRule(member.as<InstanceArraySymbol>());
+                break;
+            case SymbolKind::GenerateBlock:
+                if (!member.as<GenerateBlockSymbol>().isUninstantiated)
+                    result = findUndecidedNestedRule(member.as<GenerateBlockSymbol>());
+                break;
             case SymbolKind::GenerateBlockArray:
-                if (auto result = findNestedInstance(member.as<GenerateBlockArraySymbol>()))
-                    return result;
+                result = findUndecidedNestedRule(member.as<GenerateBlockArraySymbol>());
                 break;
             default:
                 break;
         }
+        if (result)
+            return result;
     }
     return nullptr;
+}
+
+static bool isHierarchyMember(const Symbol& member) {
+    switch (member.kind) {
+        case SymbolKind::Instance:
+        case SymbolKind::InstanceArray:
+        case SymbolKind::GenerateBlock:
+        case SymbolKind::GenerateBlockArray:
+        case SymbolKind::UninstantiatedDef:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Walks a real interface body and a virtual interface body of the same definition and
+// parameters in lockstep, through every pair that agrees, and returns the first real member
+// where they stop agreeing: a nested instance bound to another definition or other
+// parameters, a cell one side could not bind, or a hierarchy of another shape.
+static const Symbol* findBindingMismatch(const Scope& real, const Scope& virt) {
+    auto rr = real.members() | std::views::filter(isHierarchyMember);
+    auto vr = virt.members() | std::views::filter(isHierarchyMember);
+    auto r = rr.begin();
+    auto v = vr.begin();
+    for (; r != rr.end() && v != vr.end(); ++r, ++v) {
+        if (r->kind != v->kind || r->name != v->name)
+            return &*r;
+
+        const Symbol* result = nullptr;
+        switch (r->kind) {
+            case SymbolKind::Instance: {
+                auto& ri = r->as<InstanceSymbol>();
+                auto& vi = v->as<InstanceSymbol>();
+                if (!ri.body.hasSameType(vi.body))
+                    return &ri;
+                result = findBindingMismatch(ri.body, vi.body);
+                break;
+            }
+            case SymbolKind::InstanceArray:
+                result = findBindingMismatch(r->as<InstanceArraySymbol>(),
+                                             v->as<InstanceArraySymbol>());
+                break;
+            case SymbolKind::GenerateBlock: {
+                auto& rb = r->as<GenerateBlockSymbol>();
+                auto& vb = v->as<GenerateBlockSymbol>();
+                if (rb.isUninstantiated != vb.isUninstantiated)
+                    return &rb;
+                if (!rb.isUninstantiated)
+                    result = findBindingMismatch(rb, vb);
+                break;
+            }
+            case SymbolKind::GenerateBlockArray:
+                result = findBindingMismatch(r->as<GenerateBlockArraySymbol>(),
+                                             v->as<GenerateBlockArraySymbol>());
+                break;
+            default:
+                // An UninstantiatedDef: a cell one side could not bind.
+                return &*r;
+        }
+        if (result)
+            return result;
+    }
+
+    if (r != rr.end())
+        return &*r;
+    if (v != vr.end())
+        return &real.asSymbol();
+    return nullptr;
+}
+
+static void collectInterfaceLeaves(const Symbol& symbol,
+                                   SmallVectorBase<const InstanceSymbol*>& leaves) {
+    if (symbol.kind == SymbolKind::InstanceArray) {
+        for (auto elem : symbol.as<InstanceArraySymbol>().elements)
+            collectInterfaceLeaves(*elem, leaves);
+    }
+    else if (symbol.kind == SymbolKind::Instance) {
+        leaves.push_back(&symbol.as<InstanceSymbol>());
+    }
 }
 
 static const SyntaxNode* findOverrideNodeSource(const HierarchyOverrideNode& node) {
@@ -1472,7 +1581,8 @@ static const SyntaxNode* findOverrideNodeSource(const HierarchyOverrideNode& nod
 }
 
 Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
-                                            const ExpressionSyntax& syntax, bool isInterfacePort) {
+                                            const ExpressionSyntax& syntax, bool isInterfacePort,
+                                            const Type* targetType) {
     // Unwrap the expression; parentheses are superfluous.
     const ExpressionSyntax* expr = &syntax;
     while (expr->kind == SyntaxKind::ParenthesizedExpression)
@@ -1615,22 +1725,45 @@ Expression* Expression::tryBindInterfaceRef(const ASTContext& context,
                 diag.addNote(diag::NoteDeclarationHere, source->sourceRange());
         }
 
-        // IEEE 1800-2023 25.9 restricts only the defparam; clause 33 names no restriction
-        // for configurations (SVMake FIELD-d, field report 0005). Refuse only when a config
-        // rule selected this interface instance itself, or when the instance is bound under
-        // a config and holds a nested instance: a virtual interface type's body binds its
-        // nested instances without the configuration, so it may differ from the instance.
-        if (auto inst = iface->parentInstance) {
-            if (inst->configRule) {
+        // SVMake FIELD-d2: the three configuration refusals (see isUndecidedConfigRule).
+        // One diagnostic per site, for the first leaf (instance array element) that needs one.
+        SmallVector<const InstanceSymbol*, 4> leaves;
+        if (origSymbol->kind == SymbolKind::InstanceArray)
+            collectInterfaceLeaves(*origSymbol, leaves);
+        else if (iface->parentInstance)
+            leaves.push_back(iface->parentInstance);
+
+        const InstanceBodySymbol* targetBody = nullptr;
+        if (targetType) {
+            auto t = &targetType->getCanonicalType();
+            while (t->isUnpackedArray())
+                t = &t->getArrayElementType()->getCanonicalType();
+            if (t->isVirtualInterface() && !t->as<VirtualInterfaceType>().isRealIface)
+                targetBody = &t->as<VirtualInterfaceType>().iface.body;
+        }
+
+        for (auto inst : leaves) {
+            if (isUndecidedConfigRule(*inst)) {
                 auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
                 diag.addNote(diag::NoteConfigRule, inst->configRule->syntax->sourceRange());
+                break;
             }
-            else if (inst->resolvedConfig) {
-                if (auto nested = findNestedInstance(*iface)) {
-                    auto& diag = context.addDiag(diag::VirtualIfaceConfigRule, sourceRange);
+
+            if (auto nested = findUndecidedNestedRule(inst->body)) {
+                auto& diag = context.addDiag(diag::VirtualIfaceConfigNested, sourceRange);
+                diag.addNote(diag::NoteDeclarationHere, nested->location);
+                diag.addNote(diag::NoteConfigRule, nested->configRule->syntax->sourceRange());
+                break;
+            }
+
+            if (targetBody && targetBody->parentInstance &&
+                (inst->resolvedConfig || targetBody->parentInstance->resolvedConfig) &&
+                inst->body.hasSameType(*targetBody)) {
+                if (auto nested = findBindingMismatch(inst->body, *targetBody)) {
+                    auto& diag = context.addDiag(diag::VirtualIfaceConfigNested, sourceRange);
                     diag.addNote(diag::NoteDeclarationHere, nested->location);
-                    diag.addNote(diag::NoteVirtualIfaceConfigNested,
-                                 inst->resolvedConfig->useConfig.location);
+                    diag.addNote(diag::NoteVirtualIfaceConfigNested, nested->location);
+                    break;
                 }
             }
         }

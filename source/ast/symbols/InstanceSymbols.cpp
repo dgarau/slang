@@ -254,6 +254,11 @@ template<typename TSyntax>
 void resolveInstanceOverrides(const ResolvedConfig& resolvedConfig, const ASTContext& context,
                               const TSyntax& syntax, std::string_view defName, DiagCode missingCode,
                               ResolvedInstanceRules& results) {
+    // A virtual interface body has no place in the design hierarchy, so no instance
+    // path rule can select anything in it (SVMake FIELD-d2).
+    if (resolvedConfig.isVirtualIface)
+        return;
+
     auto& instOverrides = resolvedConfig.useConfig.getInstanceOverrides();
     if (instOverrides.empty())
         return;
@@ -415,6 +420,11 @@ const InstanceSymbol& InstanceSymbol::createVirtual(
     // the instantiation scope. This "virtual" instance never actually gets
     // added to the scope the proper way as a member.
     result.setParent(*context.scope);
+
+    // Bind the body's nested instances under the design's configuration, if there is one,
+    // as the configuration binds them by default (SVMake FIELD-d2): its liblist, its cell
+    // rules and the parent-library fallback apply; instance path rules do not.
+    result.resolvedConfig = comp.createVirtualIfaceConfig(result);
 
     // Allow the compilation to cache this virtual interface instance.
     return comp.getOrAddVirtualIface(result);
