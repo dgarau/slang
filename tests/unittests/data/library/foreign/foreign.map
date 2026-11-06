@@ -1,0 +1,3 @@
+// A library's C sources and headers listed beside its SV (SVMake UVM-lib-b): under
+// --exclude-ext c,cc,h they are neither loaded nor library members.
+library libforeign "a.sv", "c/x.c", "c/y.cc", "src/*";
