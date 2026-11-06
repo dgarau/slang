@@ -119,6 +119,17 @@ public:
     /// in the search set.
     void addSearchExtension(std::string_view extension);
 
+    /// @brief Excludes the files a library map declares whose extension is @a extension
+    /// (given without the leading dot, as the --exclude-ext option takes it).
+    ///
+    /// A library declaration's file list may name files that are not SystemVerilog
+    /// (a library's C sources, its headers); such a file is neither loaded nor made a
+    /// member of its library. Files named directly (addFiles, addLibraryFiles) are not
+    /// affected. Order independent: a map read before the extension was added loses its
+    /// matching files too, unless some other means also added them.
+    /// Note that an SV file named with an excluded extension is excluded as well.
+    void addExcludedLibraryMapExtension(std::string_view extension);
+
     /// @brief Adds library map files to the loader.
     ///
     /// All files that match the given pattern will be loaded and parsed as if
@@ -232,6 +243,10 @@ private:
         // eligible for automatic instantiation).
         bool isLibraryFile = false;
 
+        // True while every addition of this file came from a library map's
+        // library declaration (only those are subject to the excluded extensions).
+        bool fromLibraryMap = false;
+
         FileEntry(std::filesystem::path&& path, bool isLibraryFile, const SourceLibrary* library,
                   const UnitEntry* unit, GlobRank libraryRank) :
             path(std::move(path)), preloadedBuffer(), library(library), unit(unit),
@@ -253,7 +268,9 @@ private:
 
     void addFilesInternal(std::string_view pattern, const std::filesystem::path& basePath,
                           bool isLibraryFile, const SourceLibrary* library, const UnitEntry* unit,
-                          bool expandEnvVars, bool unmatchedIsWarning = false);
+                          bool expandEnvVars, bool unmatchedIsWarning = false,
+                          bool fromLibraryMap = false);
+    bool isExcludedFromLibraryMap(const std::filesystem::path& path) const;
     void addLibraryMapsInternal(std::string_view pattern, const std::filesystem::path& basePath,
                                 const Bag& optionBag, bool expandEnvVars,
                                 flat_hash_set<std::filesystem::path>& seenMaps);
@@ -273,6 +290,7 @@ private:
     std::vector<std::filesystem::path> searchDirectories;
     std::vector<std::filesystem::path> searchExtensions;
     flat_hash_set<std::string> uniqueExtensions;
+    flat_hash_set<std::string> libraryMapExcludedExtensions; // without the leading dot
     flat_hash_map<BufferID, std::vector<std::string>> bufferWarningOptions;
     std::vector<std::string> errors;
     std::vector<std::string> warnings;

@@ -57,6 +57,30 @@ void SourceLoader::addLibraryFiles(std::string_view libName, std::string_view pa
                      /* expandEnvVars */ false);
 }
 
+void SourceLoader::addExcludedLibraryMapExtension(std::string_view extension) {
+    if (!libraryMapExcludedExtensions.emplace(std::string(extension)).second)
+        return;
+
+    // Drop the files maps already read in that only a map declared, so the result does
+    // not depend on whether the option came before or after the map on a command line.
+    std::erase_if(fileEntries, [&](const FileEntry& entry) {
+        return entry.fromLibraryMap && isExcludedFromLibraryMap(entry.path);
+    });
+    fileIndex.clear();
+    for (size_t i = 0; i < fileEntries.size(); i++) {
+        if (!fileEntries[i].preloadedBuffer)
+            fileIndex.try_emplace(fileEntries[i].path, i);
+    }
+}
+
+bool SourceLoader::isExcludedFromLibraryMap(const fs::path& path) const {
+    if (libraryMapExcludedExtensions.empty())
+        return false;
+
+    auto ext = getU8Str(path.extension());
+    return !ext.empty() && libraryMapExcludedExtensions.contains(ext.substr(1));
+}
+
 void SourceLoader::addSearchDirectories(std::string_view pattern) {
     SmallVector<fs::path> directories;
     std::error_code ec;
@@ -505,7 +529,7 @@ SourceLibrary* SourceLoader::getOrAddLibrary(std::string_view name) {
 void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& basePath,
                                     bool isLibraryFile, const SourceLibrary* library,
                                     const UnitEntry* unit, bool expandEnvVars,
-                                    bool unmatchedIsWarning) {
+                                    bool unmatchedIsWarning, bool fromLibraryMap) {
     SmallVector<fs::path> files;
     std::error_code ec;
     auto rank = svGlob(basePath, pattern, GlobMode::Files, files, expandEnvVars, ec);
@@ -545,9 +569,14 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
 
     fileEntries.reserve(fileEntries.size() + files.size());
     for (auto&& path : files) {
+        // A library declaration's file that is not SystemVerilog (--exclude-ext).
+        if (fromLibraryMap && isExcludedFromLibraryMap(path))
+            continue;
+
         auto [it, inserted] = fileIndex.try_emplace(path, fileEntries.size());
         if (inserted) {
             fileEntries.emplace_back(std::move(path), isLibraryFile, library, unit, rank);
+            fileEntries.back().fromLibraryMap = fromLibraryMap;
         }
         else {
             // If this file is supposed to be in a separate unit but is already
@@ -562,6 +591,7 @@ void SourceLoader::addFilesInternal(std::string_view pattern, const fs::path& ba
             // If any of the times we see this is entry is for a non-library file,
             // then it's always a non-library file, hence the &=.
             entry.isLibraryFile &= isLibraryFile;
+            entry.fromLibraryMap &= fromLibraryMap;
 
             if (library) {
                 // If there is already a library for this entry and our rank is lower,
@@ -595,7 +625,8 @@ void SourceLoader::createLibrary(const LibraryDeclarationSyntax& syntax, const f
         auto spec = getPathFromSpec(*filePath);
         if (!spec.empty()) {
             addFilesInternal(spec, basePath, /* isLibraryFile */ true, library, nullptr,
-                             /* expandEnvVars */ true, /* unmatchedIsWarning */ true);
+                             /* expandEnvVars */ true, /* unmatchedIsWarning */ true,
+                             /* fromLibraryMap */ true);
         }
     }
 

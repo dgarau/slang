@@ -114,9 +114,12 @@ void Driver::addStandardArgs() {
         "--exclude-ext",
         [this](std::string_view value) {
             options.excludeExts.emplace(std::string(value));
+            sourceLoader.addExcludedLibraryMapExtension(value);
             return "";
         },
-        "Exclude provided source files with these extensions", "<ext>",
+        "Exclude provided source files, and the files library maps declare, with these "
+        "extensions",
+        "<ext>",
         CommandLineFlags::CommaList);
 
     cmdLine.setPositional(

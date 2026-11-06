@@ -455,6 +455,77 @@ TEST_CASE("Driver library map: a missing -incdir directory is still an error") {
     CHECK(driver.sourceLoader.getWarnings().empty());
 }
 
+// --exclude-ext applies to the files a library map declares (SVMake UVM-lib-b): a library may list
+// its C sources and headers beside its SV, and those are neither loaded nor made library members.
+// The only risk: an SV file named with an excluded extension is excluded too.
+static std::vector<std::string> foreignLoaded(const std::string& args, bool expectParseOk) {
+    Driver driver;
+    driver.addStandardArgs();
+    CHECK(driver.parseCommandLine(args));
+    CHECK(driver.processOptions());
+    CHECK(driver.parseAllSources());
+    bool parseOk = true;
+    for (auto& tree : driver.syntaxTrees) {
+        for (auto& diag : tree->diagnostics())
+            parseOk &= !diag.isError();
+    }
+    CHECK(parseOk == expectParseOk);
+
+    std::vector<std::string> names;
+    auto& sm = driver.sourceManager;
+    for (auto buf : sm.getAllBuffers()) {
+        if (sm.isMacroLoc(SourceLocation(buf, 0)) || sm.getIncludedFrom(buf))
+            continue;
+        auto name = std::string(sm.getRawFileName(buf));
+        if (contains(name, ".map") || contains(name, "test6.sv"))
+            continue;
+        auto lib = sm.getLibraryFor(buf);
+        names.push_back(name.substr(name.find("foreign")) + "@" +
+                        (lib ? lib->name : std::string("<none>")));
+    }
+    std::ranges::sort(names);
+    return names;
+}
+
+TEST_CASE("Driver library map: --exclude-ext drops a library's non-SV files") {
+    auto guard = OS::captureOutput();
+    auto testDir = findTestDir();
+    auto map = fmt::format("\"{0}/library/foreign/foreign.map\"", testDir);
+    auto file = fmt::format("\"{0}test6.sv\"", testDir);
+    const std::vector<std::string> svOnly = {"foreign/a.sv@libforeign",
+                                             "foreign/src/b.sv@libforeign"};
+
+    // After the map on the command line, and before it: the same answer.
+    CHECK(foreignLoaded(fmt::format("testfoo {} --libmap {} --exclude-ext c,cc,h", file, map),
+                        true) == svOnly);
+    CHECK(foreignLoaded(fmt::format("testfoo {} --exclude-ext c,cc,h --libmap {}", file, map),
+                        true) == svOnly);
+
+    // Without the option the C files are read as SystemVerilog, as upstream does.
+    auto all = foreignLoaded(fmt::format("testfoo {} --libmap {}", file, map), false);
+    CHECK(all == std::vector<std::string>{"foreign/a.sv@libforeign", "foreign/c/x.c@libforeign",
+                                          "foreign/c/y.cc@libforeign", "foreign/src/b.h@libforeign",
+                                          "foreign/src/b.sv@libforeign"});
+
+    // Only the listed extensions: the header stays when h is not excluded.
+    CHECK(foreignLoaded(fmt::format("testfoo {} --libmap {} --exclude-ext c,cc", file, map),
+                        false) ==
+          std::vector<std::string>{"foreign/a.sv@libforeign", "foreign/src/b.h@libforeign",
+                                   "foreign/src/b.sv@libforeign"});
+
+    // A file also named directly (-v) is not a library map's alone: it stays, both orders.
+    auto direct = fmt::format("\"{0}/library/foreign/c/x.c\"", testDir);
+    for (auto order : {0, 1}) {
+        auto args = order ? fmt::format("testfoo {} -v {} --libmap {} --exclude-ext c,cc,h", file,
+                                        direct, map)
+                          : fmt::format("testfoo {} --libmap {} -v {} --exclude-ext c,cc,h", file,
+                                        map, direct);
+        auto names = foreignLoaded(args, false);
+        CHECK(std::ranges::count(names, std::string("foreign/c/x.c@libforeign")) == 1);
+        CHECK(std::ranges::count(names, std::string("foreign/c/y.cc@libforeign")) == 0);
+    }
+}
+
 TEST_CASE("Driver file kind tracking") {
     auto guard = OS::captureOutput();
 
