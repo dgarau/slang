@@ -78,6 +78,16 @@ public:
     /// Idempotent; does nothing if the package has no export declarations.
     void resolveExports() const;
 
+    /// SVMake K-1236: true when the tool has excluded this package from the elaborated design (nothing in
+    /// the design references it). An excluded package keeps its symbol, its members and its lookups, but
+    /// Symbol::visit does not dispatch to a visitor for it, so no member walk over a compilation unit
+    /// (ASTVisitor, the AnalysisManager's scope visitor, a tool's own visitor) reaches its members.
+    bool isExcludedFromDesign() const { return excludedFromDesign; }
+
+    /// SVMake K-1236: excludes this package from the elaborated design (see isExcludedFromDesign). Nothing in
+    /// slang calls it.
+    void excludeFromDesign() const { excludedFromDesign = true; }
+
     void serializeTo(ASTSerializer&) const {}
 
     static PackageSymbol& fromSyntax(const Scope& scope,
@@ -88,6 +98,8 @@ public:
     static bool isKind(SymbolKind kind) { return kind == SymbolKind::Package; }
 
 private:
+    mutable bool excludedFromDesign = false;
+
     struct ExportData {
         // All `export p::x` and `export p::*` declaration items in source order.
         std::span<const syntax::PackageImportItemSyntax* const> decls;

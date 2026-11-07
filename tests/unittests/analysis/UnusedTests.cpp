@@ -1247,3 +1247,78 @@ endclass
     auto diags = analyzeShadow(text, compilation);
     CHECK_DIAGS_EMPTY;
 }
+
+TEST_CASE("SVMake K-1236: a package excluded from the design is visited and analyzed by no one") {
+    // pk_out is unreferenced and excluded; pk_in is imported by the top. An excluded package keeps its symbol and
+    // its lookups, but no member walk over a compilation unit reaches it: not an ASTVisitor, not the
+    // AnalysisManager's scope visitor (so no unused-variable diagnostic and no analyzed subroutine of it).
+    auto tree = SyntaxTree::fromText(R"(
+package pk_out;
+    int never_read;
+    function automatic int f(); int local_unused; return 1; endfunction
+endpackage
+package pk_in;
+    int in_unused;
+    function automatic int g(); return 2; endfunction
+endpackage
+module top;
+    import pk_in::*;
+    int x;
+    initial x = g();
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto diags = compilation.getAllDiagnostics();
+    CHECK(std::ranges::none_of(diags, [](auto& d) { return d.isError(); }));
+
+    auto out = compilation.getPackage("pk_out");
+    auto in = compilation.getPackage("pk_in");
+    REQUIRE(out);
+    REQUIRE(in);
+    CHECK(!out->isExcludedFromDesign());
+    out->excludeFromDesign();
+    CHECK(out->isExcludedFromDesign());
+    CHECK(!in->isExcludedFromDesign());
+    CHECK(compilation.getPackage("pk_out") == out); // lookup by name is unchanged
+
+    // A counting ASTVisitor over the root sees pk_in's members and none of pk_out's.
+    int outMembers = 0, inMembers = 0, packages = 0;
+    compilation.getRoot().visit(makeVisitor(
+        [&](auto& v, const PackageSymbol& p) {
+            packages++;
+            v.visitDefault(p);
+        },
+        [&](auto& v, const VariableSymbol& var) {
+            if (var.getParentScope() == out)
+                outMembers++;
+            if (var.getParentScope() == in)
+                inMembers++;
+            v.visitDefault(var);
+        }));
+    CHECK(packages == 1);
+    CHECK(outMembers == 0);
+    CHECK(inMembers == 1);
+
+    // The AnalysisManager does not analyze it: no analyzed scope, no analyzed subroutine, no diagnostic located in it.
+    compilation.freeze();
+    AnalysisOptions options;
+    options.flags = AnalysisFlags::CheckUnused;
+    AnalysisManager analysisManager(options);
+    analysisManager.analyze(compilation);
+    auto analysisDiags = analysisManager.getDiagnostics();
+    auto& sm = *compilation.getSourceManager();
+    auto outRange = out->getSyntax()->sourceRange();
+    auto inRange = in->getSyntax()->sourceRange();
+    auto within = [&](const Diagnostic& d, SourceRange r) {
+        auto loc = sm.getFullyOriginalLoc(d.location);
+        return loc.buffer() == r.start().buffer() && loc.offset() >= r.start().offset() &&
+               loc.offset() < r.end().offset();
+    };
+    CHECK(std::ranges::none_of(analysisDiags, [&](auto& d) { return within(d, outRange); }));
+    CHECK(std::ranges::any_of(analysisDiags, [&](auto& d) { return within(d, inRange); })); // pk_in's unused var
+    CHECK(analysisManager.getAnalyzedScope(*out) == nullptr);
+    CHECK(analysisManager.getAnalyzedScope(*in) != nullptr);
+    auto& fsym = out->find("f")->as<SubroutineSymbol>();
+    CHECK(analysisManager.getAnalyzedSubroutine(fsym) == nullptr);
+}
