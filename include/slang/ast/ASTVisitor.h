@@ -227,7 +227,16 @@ decltype(auto) Symbol::visit(TVisitor&& visitor, Args&&... args) const {
         SYMBOL(Instance);
         SYMBOL(InstanceBody);
         SYMBOL(InstanceArray);
-        SYMBOL(Package);
+        // SVMake K-1236: a package the tool excluded from the design is visited by no one.
+        case SymbolKind::Package:
+            if (static_cast<const PackageSymbol*>(this)->isExcludedFromDesign()) {
+                using TResult = decltype(visitor.visit(*static_cast<const PackageSymbol*>(this), std::forward<Args>(args)...));
+                if constexpr (std::is_void_v<TResult>)
+                    return;
+                else
+                    return TResult{};
+            }
+            return visitor.visit(*static_cast<const PackageSymbol*>(this), std::forward<Args>(args)...);
         SYMBOL(ExplicitImport);
         SYMBOL(WildcardImport);
         SYMBOL(GenerateBlock);
