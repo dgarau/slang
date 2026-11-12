@@ -2374,6 +2374,18 @@ module top;
 endmodule
 ```
 
+-Wnonstandard-cast-type
+A cast's casting_type is a simple_type, a constant primary, a signing, 'string' or 'const'. A data
+type written with a signing or a packed dimension (`int unsigned`, `bit signed`, `logic [7:0]`) is
+not a simple_type, so the cast is not in the grammar, although some tools accept it. Use a signing
+cast (`unsigned'(x)`), `$unsigned(x)`, a width cast (`8'(x)`) or a typedef.
+```
+module m;
+    int s;
+    int unsigned u = int unsigned'(s);
+endmodule
+```
+
 -Wnonstandard-dist
 'dist' constraint items are technically not allowed to be surrounded by parentheses according
 to the language grammar, but most tools allow it as an extension.
