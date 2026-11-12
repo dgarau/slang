@@ -775,6 +775,28 @@ ExpressionSyntax& Parser::parsePostfixExpression(ExpressionSyntax& lhs,
                 auto& innerExpr = parseExpression();
                 auto closeParen = expect(TokenKind::CloseParenthesis);
                 auto& parenExpr = factory.parenthesizedExpression(openParen, innerExpr, closeParen);
+
+                // casting_type is a simple_type, so `int unsigned'(x)` and `logic [7:0]'(x)` (a
+                // type with a signing or a packed dimension) are not in the grammar (A.2.2.1).
+                switch (expr->kind) {
+                    case SyntaxKind::BitType:
+                    case SyntaxKind::LogicType:
+                    case SyntaxKind::RegType:
+                    case SyntaxKind::ByteType:
+                    case SyntaxKind::ShortIntType:
+                    case SyntaxKind::IntType:
+                    case SyntaxKind::LongIntType:
+                    case SyntaxKind::IntegerType:
+                    case SyntaxKind::TimeType: {
+                        auto& it = expr->as<IntegerTypeSyntax>();
+                        if (it.signing || it.dimensions.size())
+                            addDiag(diag::NonstandardCastType, expr->sourceRange());
+                        break;
+                    }
+                    default:
+                        break;
+                }
+
                 expr = &factory.castExpression(*expr, apostrophe, parenExpr);
                 break;
             }

@@ -1199,3 +1199,46 @@ end
         CHECK(diagnostics[i].code == diag::MisplacedNew);
     CHECK(diagnostics[13].code == diag::InvalidSuperNew);
 }
+
+TEST_CASE("SVMake FIELD-ah: a casting type with a signing or a packed dimension is not a simple_type") {
+    auto& text = R"(
+module m;
+    int s;
+    int unsigned a = int unsigned'(s);
+    bit signed b = bit signed'(s);
+    logic [7:0] c = logic [7:0]'(s);
+    integer unsigned d = integer unsigned'(s);
+endmodule
+)";
+    parseCompilationUnit(text);
+
+    REQUIRE(diagnostics.size() == 4);
+    for (auto& d : diagnostics)
+        CHECK(d.code == diag::NonstandardCastType);
+}
+
+TEST_CASE("SVMake FIELD-ah: legal casting types do not warn") {
+    auto& text = R"(
+module m;
+    typedef int unsigned uint_t;
+    int s;
+    localparam int WIDTH = 8;
+    int a = unsigned'(s);
+    int b = signed'(s);
+    int c = int'(s);
+    int d = byte'(s);
+    int e = longint'(s);
+    int f = logic'(s);
+    string g = string'(s);
+    int h = const'(s);
+    int i = uint_t'(s);
+    int j = p::t'(s);
+    int k = 8'(s);
+    int l = WIDTH'(s);
+    int n = type(s)'(s);
+    int o = bit'(s);
+endmodule
+)";
+    parseCompilationUnit(text);
+    CHECK(diagnostics.empty());
+}

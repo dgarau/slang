@@ -318,6 +318,7 @@ warning nonstandard-foreach NonstandardForeach "non-standard foreach loop variab
 warning nonstandard-hierarchical-cross NonstandardHierarchicalCross "non-standard hierarchical reference in cover cross item"
 warning foreach-call-expr ForeachCallExpr "foreach array expression is not a name"
 warning lifetime-prototype LifetimeForPrototype "lifetime specifier is not allowed on prototype declaration"
+warning nonstandard-cast-type NonstandardCastType "casting type is not a simple_type (IEEE 1800-2023 6.24.1, A.2.2.1); use 'unsigned'(x), $unsigned(x) or a typedef"
 warning nonstandard-dist NonstandardDist "use of parentheses around 'dist' expression is non-standard"
 warning nonstandard-inside NonstandardInside "use of 'inside' without braces is non-standard"
 warning nonstandard-constraint-block NonstandardConstraintBlock "use of nested constraint block as a constraint item is non-standard"
@@ -1318,7 +1319,7 @@ note NoteCommandLine "{}"
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.
 
-group default = { real-underflow real-overflow vector-overflow int-overflow unconnected-input-port
+group default = { nonstandard-cast-type real-underflow real-overflow vector-overflow int-overflow unconnected-input-port
                   unconnected-output-port unconnected-inout-port null-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
                   extra-pragma-args expected-diag-arg unknown-diag-arg pragma-diag-level explicit-static
