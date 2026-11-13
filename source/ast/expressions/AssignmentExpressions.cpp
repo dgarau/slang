@@ -579,7 +579,12 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
     // with a default setter -- we should use that default setter value for all default
     // inserted elements. This isn't described in the LRM anywhere but all commercial
     // tools do the same thing.
-    ConstantValue def = elemType->getDefaultValue();
+    // Otherwise the elements start as a variable of the element type would (7.5.1), its
+    // struct member initializers (7.2.2) included.
+    if (index == count)
+        return result;
+
+    ConstantValue def;
     if (initExpr() && initExpr()->kind == ExpressionKind::StructuredAssignmentPattern) {
         auto& sap = initExpr()->as<StructuredAssignmentPatternExpression>();
         if (sap.defaultSetter) {
@@ -587,6 +592,11 @@ ConstantValue NewArrayExpression::evalImpl(EvalContext& context) const {
             if (!def)
                 return nullptr;
         }
+    }
+    if (!def) {
+        def = elemType->getInitialValue(context);
+        if (!def)
+            return nullptr;
     }
 
     for (; index < count; index++)

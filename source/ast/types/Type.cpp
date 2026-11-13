@@ -10,6 +10,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Bitstream.h"
 #include "slang/ast/Compilation.h"
+#include "slang/ast/EvalContext.h"
 #include "slang/ast/TypeProvider.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/TypePrinter.h"
@@ -826,6 +827,65 @@ bitmask<IntegralFlags> Type::getIntegralFlags() const {
 ConstantValue Type::getDefaultValue() const {
     GetDefaultVisitor visitor;
     return visit(visitor);
+}
+
+// Does a variable of this (canonical) type start from a member initializer anywhere in it?
+// Only the shapes getInitialValue builds through: an unpacked struct's fields, a fixed-size
+// unpacked array's element, an unpacked union's first member (the one 7.3 initializes).
+static bool holdsMemberInitializer(const Type& type) {
+    auto& ct = type.getCanonicalType();
+    if (ct.kind == SymbolKind::UnpackedStructType) {
+        for (auto field : ct.as<UnpackedStructType>().fields) {
+            if (field->getInitializer() || holdsMemberInitializer(field->getType()))
+                return true;
+        }
+        return false;
+    }
+    if (ct.kind == SymbolKind::FixedSizeUnpackedArrayType)
+        return holdsMemberInitializer(ct.as<FixedSizeUnpackedArrayType>().elementType);
+    if (ct.kind == SymbolKind::UnpackedUnionType) {
+        auto& fields = ct.as<UnpackedUnionType>().fields;
+        return !fields.empty() && holdsMemberInitializer(fields[0]->getType());
+    }
+    return false;
+}
+
+ConstantValue Type::getInitialValue(EvalContext& context) const {
+    auto& ct = getCanonicalType();
+    if (!holdsMemberInitializer(ct))
+        return getDefaultValue();
+
+    if (ct.kind == SymbolKind::UnpackedStructType) {
+        std::vector<ConstantValue> elements;
+        for (auto field : ct.as<UnpackedStructType>().fields) {
+            ConstantValue cv;
+            if (auto init = field->getInitializer())
+                cv = init->eval(context);
+            else
+                cv = field->getType().getInitialValue(context);
+            if (!cv)
+                return nullptr;
+            elements.emplace_back(std::move(cv));
+        }
+        return elements;
+    }
+
+    if (ct.kind == SymbolKind::FixedSizeUnpackedArrayType) {
+        auto& at = ct.as<FixedSizeUnpackedArrayType>();
+        ConstantValue elem = at.elementType.getInitialValue(context);
+        if (!elem)
+            return nullptr;
+        return std::vector<ConstantValue>(at.range.width(), elem);
+    }
+
+    // An unpacked union: its first member's initial value, active as getDefaultValue() says.
+    auto& ut = ct.as<UnpackedUnionType>();
+    ConstantValue result = ut.getDefaultValue();
+    ConstantValue first = ut.fields[0]->getType().getInitialValue(context);
+    if (!first)
+        return nullptr;
+    result.unionVal()->value = std::move(first);
+    return result;
 }
 
 ConstantRange Type::getFixedRange() const {

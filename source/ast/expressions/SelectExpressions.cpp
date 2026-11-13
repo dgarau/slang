@@ -300,14 +300,22 @@ LValue ElementSelectExpression::evalLValueImpl(EvalContext& context) const {
     }
 
     // Handling for associative arrays.
+    // A write that creates an element (an associative entry, a queue append) starts it as a
+    // variable of the element type would (13.4.3), its struct member initializers (7.2.2) included.
     if (valType.isAssociativeArray()) {
-        lval.addArrayLookup(std::move(associativeIndex), type->getDefaultValue());
+        ConstantValue def = type->getInitialValue(context);
+        if (!def)
+            return nullptr;
+        lval.addArrayLookup(std::move(associativeIndex), std::move(def));
         return lval;
     }
 
     // Handling for strings, dynamic arrays, and queues.
     SLANG_ASSERT(range->left == range->right);
-    lval.addIndex(range->left, type->getDefaultValue());
+    ConstantValue def = type->getInitialValue(context);
+    if (!def)
+        return nullptr;
+    lval.addIndex(range->left, std::move(def));
 
     return lval;
 }

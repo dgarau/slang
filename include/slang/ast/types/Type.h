@@ -15,6 +15,7 @@
 namespace slang::ast {
 
 class Compilation;
+class EvalContext;
 class TypeProvider;
 struct LookupResult;
 enum class RandMode;
@@ -286,6 +287,17 @@ public:
     /// Gets the default value for the type. An uninitialized variable of this
     /// type will have the given default value.
     ConstantValue getDefaultValue() const;
+
+    /// Gets the value a variable of this type starts with when constant evaluation creates
+    /// it without an initializer (a subroutine's result variable, an uninitialized local, the
+    /// elements `new[]` pads with, an element a write creates in an associative array or by a
+    /// queue append). IEEE 1800-2023 13.4.3: such variables "are initialized as
+    /// they would be for normal simulation", so the member initializers of an unpacked struct
+    /// (7.2.2) apply, at any depth: a nested struct, the elements of a fixed-size unpacked
+    /// array, the first member of an unpacked union (7.3). A type that holds no member
+    /// initializer gets exactly getDefaultValue(). Returns an empty value, with the reason
+    /// diagnosed in @a context, when a member initializer fails to evaluate.
+    ConstantValue getInitialValue(EvalContext& context) const;
 
     /// Returns the fixed range of the type, if it has one. This can be determined
     /// via the hasFixedRange() method. If it does not, this returns an empty range.
