@@ -94,8 +94,13 @@ ER VariableDeclStatement::evalImpl(EvalContext& context) const {
         }
     }
 
-    if (!initial)
-        initial = symbol.getType().getDefaultValue();
+    // 13.4.3: an uninitialized local starts as it would in normal simulation, its
+    // type's struct member initializers (7.2.2) included.
+    if (!initial) {
+        initial = symbol.getType().getInitialValue(context);
+        if (!initial)
+            return ER::Fail;
+    }
 
     // Create storage for the variable.
     context.createLocal(&symbol, initial);

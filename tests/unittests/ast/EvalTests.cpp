@@ -4664,3 +4664,104 @@ TEST_CASE("A string literal into a fixed unpacked byte array keeps every charact
     CHECK(session.eval("d[2]").integer() == 0);
     NO_SESSION_ERRORS;
 }
+
+TEST_CASE("SVMake K-1666: a constant call's struct variables start from their member initializers") {
+    // 13.4.3: the variables of a constant function call "are initialized as they would be for
+    // normal simulation" -- 7.2.2's member initializers included -- for the result variable, an
+    // uninitialized local (nested, in a fixed array, the first member of a union, a block local,
+    // a static local), the elements new[] pads with, and an element
+    // a write creates (an associative entry, a queue append). A type with no member initializer, and
+    // a variable with its own initializer, are unchanged.
+    auto tree = SyntaxTree::fromText(R"(
+typedef struct { int k = 5; int j; } fd_t;
+typedef struct { fd_t in; logic [3:0] z; } nd_t;
+typedef union { fd_t a; int b; } un_t;
+typedef fd_t fa_t[2];
+typedef struct { int k; int j; } pd_t;
+function automatic int five(); return 5; endfunction
+typedef struct { int c = five() + 1; string s = "dflt"; real r = 2.5; } cs_t;
+
+function automatic fd_t mkp(); mkp.j = 8; endfunction
+function automatic nd_t mkn(); mkn.z = 1; endfunction
+function automatic fa_t mka(); mka[0].j = 1; endfunction
+function automatic cs_t mkc(); endfunction
+function automatic int gl(); fd_t loc; return loc.k; endfunction
+function automatic int ga(); fa_t loc; return loc[1].k; endfunction
+function automatic int gu(); un_t loc; return loc.a.k; endfunction
+function automatic int gb(); begin fd_t loc; return loc.k; end endfunction
+function automatic int gd(); fd_t d[]; d = new[2]; return d[1].k; endfunction
+function automatic int gdi(); fd_t d[]; d = new[3]('{'{k:1, j:2}}); return d[0].k * 10 + d[2].k; endfunction
+function automatic int gx(); fd_t loc = '{k:7, j:0}; return loc.k; endfunction
+function automatic int gp(); pd_t loc; return loc.k; endfunction
+function int gs(); fd_t loc; loc.k++; return loc.k; endfunction
+function automatic int gaa(); fd_t aa[int]; aa[3].j = 8; return aa[3].k * 10 + aa[3].j; endfunction
+function automatic int gq(); fd_t q[$]; q.push_back('{k:1, j:1}); q[1].j = 8; return q[1].k * 10 + q.size(); endfunction
+
+module m;
+    localparam fd_t LP = mkp();
+    localparam nd_t LN = mkn();
+    localparam fa_t LA = mka();
+    localparam cs_t LC = mkc();
+    localparam int LG = gl();
+    localparam int LGA = ga();
+    localparam int LGU = gu();
+    localparam int LGB = gb();
+    localparam int LGD = gd();
+    localparam int LGDI = gdi();
+    localparam int LGX = gx();
+    localparam int LGP = gp();
+    localparam int LS1 = gs();
+    localparam int LS2 = gs();
+    localparam int LAA = gaa();
+    localparam int LQ = gq();
+    int arr[gl()];
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto& diags = compilation.getAllDiagnostics();
+    // A static local's initializer is skipped in a constant function (ConstEvalStaticSkipped
+    // does not fire here: gs's local has none); nothing else is diagnosed.
+    CHECK(diags.empty());
+
+    auto value = [&](const char* name) {
+        return compilation.getRoot().lookupName<ParameterSymbol>("m."s + name).getValue();
+    };
+    auto integer = [&](const char* name) { return *value(name).integer().as<int32_t>(); };
+
+    auto lp = value("LP");
+    CHECK(*lp.elements()[0].integer().as<int32_t>() == 5);
+    CHECK(*lp.elements()[1].integer().as<int32_t>() == 8);
+
+    auto ln = value("LN");
+    CHECK(*ln.elements()[0].elements()[0].integer().as<int32_t>() == 5);
+    CHECK(ln.elements()[0].elements()[1].integer().as<int32_t>() == 0);
+    CHECK(*ln.elements()[1].integer().as<int32_t>() == 1);
+
+    auto la = value("LA");
+    CHECK(*la.elements()[0].elements()[0].integer().as<int32_t>() == 5);
+    CHECK(*la.elements()[0].elements()[1].integer().as<int32_t>() == 1);
+    CHECK(*la.elements()[1].elements()[0].integer().as<int32_t>() == 5);
+
+    auto lc = value("LC");
+    CHECK(*lc.elements()[0].integer().as<int32_t>() == 6);
+    CHECK(lc.elements()[1].str() == "dflt");
+    CHECK(lc.elements()[2].real() == 2.5);
+
+    CHECK(integer("LG") == 5);
+    CHECK(integer("LGA") == 5);
+    CHECK(integer("LGU") == 5);
+    CHECK(integer("LGB") == 5);
+    CHECK(integer("LGD") == 5);
+    CHECK(integer("LGDI") == 15);
+    CHECK(integer("LGX") == 7);
+    CHECK(integer("LGP") == 0);
+    CHECK(integer("LS1") == 6);
+    CHECK(integer("LS2") == 6);
+    CHECK(integer("LAA") == 58);
+    CHECK(integer("LQ") == 52);
+
+    auto& arr = compilation.getRoot().lookupName<VariableSymbol>("m.arr");
+    CHECK(arr.getType().getFixedRange().width() == 5);
+}

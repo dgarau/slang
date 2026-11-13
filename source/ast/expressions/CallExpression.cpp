@@ -834,8 +834,15 @@ ConstantValue CallExpression::invokeSubroutine(EvalContext& context, const Subro
     for (size_t i = 0; i < formals.size(); i++)
         context.createLocal(formals[i], args[i]);
 
+    // 13.4.3: the result variable is initialized as it would be for normal simulation,
+    // its type's struct member initializers (7.2.2) included.
     SLANG_ASSERT(symbol.returnValVar);
-    context.createLocal(symbol.returnValVar);
+    ConstantValue initial = symbol.returnValVar->getType().getInitialValue(context);
+    if (!initial) {
+        context.popFrame();
+        return nullptr;
+    }
+    context.createLocal(symbol.returnValVar, std::move(initial));
 
     using ER = Statement::EvalResult;
     ER er = symbol.getBody().eval(context);
