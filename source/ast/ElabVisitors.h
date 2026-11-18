@@ -135,7 +135,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     void handle(const ContinuousAssignSymbol& symbol) {
         if (!handleDefault(symbol))
             return;
-        checkDeferredEventCalls(symbol.getAssignment(), symbol, "a continuous assignment"sv);
+        noteDeferredEventCalls(symbol.getAssignment(), symbol, "a continuous assignment"sv);
         symbol.getDelay();
     }
 
@@ -235,7 +235,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         symbol.getDelay();
         symbol.checkInitializer();
         if (auto init = symbol.getInitializer())
-            checkDeferredEventCalls(*init, symbol, "a net declaration assignment"sv);
+            noteDeferredEventCalls(*init, symbol, "a net declaration assignment"sv);
     }
 
     void handle(const VariableSymbol& symbol) {
@@ -532,6 +532,14 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
             for (auto attr : attrList)
                 attr->getValue();
         }
+
+        // Last, once every body has been bound in its normal order: the 13.4.4 walk reads
+        // the subroutine bodies the noted calls reach. Run while visiting, it bound them
+        // EARLIER, which changed what later passes saw in a design's order (SVMake P27: a
+        // UVM test's IR hash moved with no diagnostic). Copied: reporting cannot add more.
+        auto pending = std::move(pendingDeferredEventCalls);
+        for (auto& [expr, symbol, contextName] : pending)
+            checkDeferredEventCalls(*expr, *symbol, contextName);
     }
 
     static bool isWithinInterface(const InstanceSymbol& symbol) {
@@ -685,6 +693,18 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         return found;
     }
 
+    struct PendingDeferredEventCall {
+        const Expression* expr;
+        const Symbol* symbol;
+        std::string_view contextName;
+    };
+    SmallVector<PendingDeferredEventCall> pendingDeferredEventCalls;
+
+    void noteDeferredEventCalls(const Expression& expr, const Symbol& symbol,
+                                std::string_view contextName) {
+        pendingDeferredEventCalls.push_back({&expr, &symbol, contextName});
+    }
+
     void checkDeferredEventCalls(const Expression& expr, const Symbol& symbol,
                                  std::string_view contextName) {
         // An uninstantiated block reports nothing, and binding the bodies its calls name
@@ -714,7 +734,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         if (symbol.lifetime != VariableLifetime::Static)
             return;
         if (auto init = symbol.getInitializer())
-            checkDeferredEventCalls(*init, symbol, "a static variable initializer"sv);
+            noteDeferredEventCalls(*init, symbol, "a static variable initializer"sv);
     }
 
     flat_hash_map<const SubroutineSymbol*, std::optional<DeferredEvent>> deferredEvents;
