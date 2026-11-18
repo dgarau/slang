@@ -5926,3 +5926,39 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+TEST_CASE("SVMake K-376: a bare 'this' in an inline randomize-with block") {
+    // IEEE 1800-2023 18.7.1: names qualified by this bind to the object being randomized,
+    // and local::this to the caller's. A bare `this` used to read nameParts.back() of an
+    // empty list in Lookup::withinClassRandomize (an assertion; garbage in a Release build).
+    // D's `this` and C's are unrelated classes, so `this == c` binds only if `this` is the
+    // randomized object, and `local::this == self` only if local::this is the caller's.
+    auto tree = SyntaxTree::fromText(R"(
+class C;
+    rand int v;
+endclass
+
+class D;
+    D self;
+    function int go(C c);
+        self = this;
+        return c.randomize() with { this == c -> v == 5; local::this == self -> v > 0; };
+    endfunction
+endclass
+
+module m;
+    C c = new;
+    C d;
+    int ok;
+    initial begin
+        d = c;
+        ok = c.randomize() with { this == d -> v == 6; };
+        ok = c.randomize() with { this != null; };
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}

@@ -898,6 +898,7 @@ error NestedDisableIff "cannot instantiate '{}' here because it has a disable if
 error GlobalSampledValueNested "global clocking future sampled value functions may not be nested"
 error DisableIffLocalVar "local variables cannot be used in disable iff conditions"
 error DisableIffMatched "'matched' method cannot be used in disable iff conditions"
+warning disable-iff-sampled-clock DisableIffSampledNoClock "sampled value function '{}' in a disable condition must give its clock explicitly in its argument list (IEEE 1800-2023 16.12); accept it with -Wno-disable-iff-sampled-clock"
 error PropAbortLocalVar "local variables cannot be used in property abort conditions"
 error PropAbortMatched "'matched' method cannot be used in property abort conditions"
 error RecursivePropDisableIff "recursive properties cannot have disable iff conditions"
@@ -950,6 +951,7 @@ error ForwardTypedefDoesNotMatch "forward typedef basic type '{}' does not match
 error ForwardTypedefVisibility "declared visibility of forward typedef does not match the visibility of the actual type declaration"
 error PackedMemberNotIntegral "packed members must be of integral type (not {})"
 error PackedMemberHasInitializer "packed members can not have initializers"
+warning union-struct-member-default UnionStructMemberInitializer "member '{}' of an unpacked structure containing a union cannot have a default value (IEEE 1800-2023 7.2.2); accept it with -Wno-union-struct-member-default"
 error PackedDimsOnPredefinedType "packed dimensions not allowed on predefined integer type '{}'"
 error PackedUnionWidthMismatch "all members of a packed union must have the same width; '{}' has width of {}, previously seen width was {}"
 error InvalidArraySize "{} is not a valid size for an array"
@@ -1160,6 +1162,8 @@ warning task-ignored ConstSysTaskIgnored "system task '{}' is ignored in constan
 warning constant-conversion ConstantConversion "implicit conversion from {} to {} changes value from {} to {}"
 
 subsystem Compilation
+warning deferred-event-call DeferredEventCall "function '{}' schedules a nonblocking assignment or trigger that cannot become active until after it returns, and is called from {}, which is not a thread created by an initial or always procedure (IEEE 1800-2023 13.4.4); accept it with -Wno-deferred-event-call"
+note NoteDeferredEventHere "scheduled here, in '{}'"
 fatal MaxInstanceDepthExceeded "{} instantiation exceeded maximum depth of {}"
 fatal InfinitelyRecursiveHierarchy "infinitely recursive instantiation of '{}'"
 error InvalidTopModule "'{}' is not a valid top-level module"
@@ -1319,7 +1323,7 @@ note NoteCommandLine "{}"
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.
 
-group default = { nonstandard-cast-type real-underflow real-overflow vector-overflow int-overflow unconnected-input-port
+group default = { nonstandard-cast-type union-struct-member-default deferred-event-call disable-iff-sampled-clock real-underflow real-overflow vector-overflow int-overflow unconnected-input-port
                   unconnected-output-port unconnected-inout-port null-port
                   unconnected-unnamed-port redef-macro unknown-pragma unknown-warning-option
                   extra-pragma-args expected-diag-arg unknown-diag-arg pragma-diag-level explicit-static
@@ -1405,12 +1409,14 @@ compat Default error = { duplicate-definition bad-procedural-force unknown-sys-n
                          ref-arg-in-fork-join cannot-index-scalar string-in-constraint
                          virtual-arg-name-mismatch virtual-visibility-mismatch undefined-param-override
                          redefinition redefinition-different-type nonstandard-instance-array-query
-                         missing-global-clocking }
+                         missing-global-clocking union-struct-member-default deferred-event-call
+                         disable-iff-sampled-clock }
 
 compat Vcs error = { duplicate-definition bad-procedural-force unknown-sys-name nonstandard-hierarchical-cross
                      nonstandard-string-concat nonstandard-inside mixed-var-assigns multiple-cont-assigns
                      multiple-always-assigns misplaced-trailing-separator initializer-required
-                     string-int-concat nonstandard-instance-array-query missing-global-clocking }
+                     string-int-concat nonstandard-instance-array-query missing-global-clocking
+                     union-struct-member-default deferred-event-call disable-iff-sampled-clock }
 
 compat Vcs ignored = { explicit-static implicit-conv finish-num nonstandard-sys-func nonstandard-foreach
                        foreach-call-expr nonstandard-dist nested-comment }

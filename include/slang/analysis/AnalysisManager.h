@@ -292,7 +292,11 @@ private:
             }
 
             if constexpr (HasVisitExprs<T, NonProceduralExprVisitor>) {
+                if constexpr (std::is_same_v<T, ast::AssertionInstanceExpression>)
+                    instanceDepth++;
                 expr.visitExprs(*this);
+                if constexpr (std::is_same_v<T, ast::AssertionInstanceExpression>)
+                    instanceDepth--;
             }
         }
 
@@ -300,6 +304,11 @@ private:
         AnalysisManager& manager;
         const ast::Symbol& containingSymbol;
         bool isDisableCondition;
+
+        // How many sequence / property instance bodies the walk is inside: a call directly
+        // in a disable condition (depth 0) is checked when the condition is bound
+        // (DisableIffSampledNoClock, IEEE 1800-2023 16.12; SVMake K-1822).
+        uint32_t instanceDepth = 0;
 
         const ast::TimingControl* getDefaultClocking() const;
         void visitCall(const ast::CallExpression& expr);

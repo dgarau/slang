@@ -1874,6 +1874,8 @@ bool Lookup::withinClassRandomize(const ASTContext& context, const NameSyntax& s
 
             break;
         case SyntaxKind::ThisHandle:
+            // A bare `this` (not a scoped name) has no further name parts, so the
+            // `this.super` check below must not read nameParts.back() (SVMake K-376).
             result.found = details.thisVar;
             if (!result.found)
                 result.found = findThisHandle(*context.scope, flags, name.range, result);
@@ -2459,7 +2461,8 @@ void Lookup::qualified(const ScopedNameSyntax& syntax, const ASTContext& context
             return;
         case SyntaxKind::ThisHandle:
             result.found = findThisHandle(scope, flags, first.range, result);
-            if (result.found && nameParts.back().kind == SyntaxKind::SuperHandle) {
+            if (result.found && !nameParts.empty() &&
+                nameParts.back().kind == SyntaxKind::SuperHandle) {
                 // Handle "this.super.whatever" the same as if the user had just
                 // written "super.whatever".
                 first = nameParts.back().name;

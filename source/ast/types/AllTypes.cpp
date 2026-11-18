@@ -1062,6 +1062,7 @@ const Type& UnpackedStructType::fromSyntax(const ASTContext& context,
     uint64_t bitOffset = 0;
     uint64_t bitstreamWidth = 0;
     SmallVector<const FieldSymbol*> fields;
+    SmallVector<const DeclaratorSyntax*> initialized;
     for (auto member : syntax.members) {
         result->addEnumMembers(*member);
 
@@ -1090,12 +1091,42 @@ const Type& UnpackedStructType::fromSyntax(const ASTContext& context,
 
             result->addMember(*field);
             fields.push_back(field);
+            if (decl->initializer)
+                initialized.push_back(decl);
 
             bitOffset += field->getType().getSelectableWidth();
             bitstreamWidth += field->getType().getBitstreamWidth();
             if (bitOffset > MaxBitWidth || bitstreamWidth > MaxBitWidth) {
                 context.addDiag(diag::ObjectTooLarge, syntax.sourceRange());
                 return comp.getErrorType();
+            }
+        }
+    }
+
+    // IEEE 1800-2023 7.2.2: "Members of unpacked structures containing a union ... shall not
+    // be assigned individual default member values." A member is a union, packed or unpacked,
+    // or a fixed-size unpacked array of them (its elements are stored in the structure). A
+    // structure member that itself contains a union does not count: that inner structure is
+    // checked on its own (SVMake K-1721).
+    if (!initialized.empty()) {
+        const FieldSymbol* unionField = nullptr;
+        for (auto field : fields) {
+            auto type = &field->getType().getCanonicalType();
+            while (type->kind == SymbolKind::FixedSizeUnpackedArrayType)
+                type = &type->getArrayElementType()->getCanonicalType();
+            if (type->isUnion()) {
+                unionField = field;
+                break;
+            }
+        }
+
+        if (unionField) {
+            for (auto decl : initialized) {
+                auto& diag = context.addDiag(diag::UnionStructMemberInitializer,
+                                             decl->initializer->equals.location());
+                diag << decl->name.valueText();
+                diag << decl->initializer->expr->sourceRange();
+                diag.addNote(diag::NoteDeclarationHere, unionField->location);
             }
         }
     }

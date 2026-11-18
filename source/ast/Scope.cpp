@@ -9,6 +9,7 @@
 
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
+#include "slang/ast/expressions/AssertionExpr.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CheckerSymbols.h"
 #include "slang/ast/symbols/ClassSymbols.h"
@@ -1302,6 +1303,7 @@ void Scope::elaborate() const {
                     if (!expr.type->isVoid())
                         context.requireBooleanConvertible(expr);
 
+                    DisableIffAssertionExpr::checkSampledValueClocks(expr, context);
                     compilation.noteDefaultDisable(*this, expr);
                 }
                 break;

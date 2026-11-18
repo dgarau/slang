@@ -780,6 +780,11 @@ public:
     static AssertionExpr& fromSyntax(const syntax::DisableIffSyntax& syntax,
                                      const AssertionExpr& expr, const ASTContext& context);
 
+    /// Reports each sampled value function other than $sampled in a disable condition
+    /// (a `disable iff` or a `default disable iff`) whose clock is not given in its actual
+    /// argument list: IEEE 1800-2023 16.12 requires it to be explicit there.
+    static void checkSampledValueClocks(const Expression& condition, const ASTContext& context);
+
     void serializeTo(ASTSerializer& serializer) const;
 
     static bool isKind(AssertionExprKind kind) { return kind == AssertionExprKind::DisableIff; }

@@ -1925,13 +1925,19 @@ endmodule
     AnalysisManager analysisManager;
 
     auto diags = analyze(text, compilation, analysisManager);
-    REQUIRE(diags.size() == 6);
+    REQUIRE(diags.size() == 5);
     CHECK(diags[0].code == diag::SampledValueFuncClock);
     CHECK(diags[1].code == diag::SampledValueFuncClock);
     CHECK(diags[2].code == diag::SampledValueFuncClock);
     CHECK(diags[3].code == diag::SampledValueFuncClock);
     CHECK(diags[4].code == diag::SampledValueFuncClock);
-    CHECK(diags[5].code == diag::SampledValueFuncClock);
+
+    // The `$past(a)` directly in the disable condition is reported when the condition is
+    // bound (IEEE 1800-2023 16.12; SVMake K-1822), not by the analysis.
+    auto& compDiags = compilation.getAllDiagnostics();
+    CHECK(std::ranges::count_if(compDiags, [](auto& d) {
+              return d.code == diag::DisableIffSampledNoClock;
+          }) == 1);
 }
 
 TEST_CASE("Triggered / matched clock resolution") {
@@ -2044,10 +2050,17 @@ endmodule : mod_sva_checks
     AnalysisManager analysisManager;
 
     auto diags = analyze(text, compilation, analysisManager);
-    REQUIRE(diags.size() == 3);
+    REQUIRE(diags.size() == 2);
     CHECK(diags[0].code == diag::SampledValueFuncClock);
     CHECK(diags[1].code == diag::AssertionNoClock);
-    CHECK(diags[2].code == diag::SampledValueFuncClock);
+
+    // a6's `$rose(a)` directly in the disable condition is reported when the condition is
+    // bound (IEEE 1800-2023 16.12; SVMake K-1822); the `$rose(b)` inside e4 stays the
+    // analysis's (diags[0]).
+    auto& compDiags = compilation.getAllDiagnostics();
+    CHECK(std::ranges::count_if(compDiags, [](auto& d) {
+              return d.code == diag::DisableIffSampledNoClock;
+          }) == 1);
 }
 
 TEST_CASE("Sequence methods and sample functions inside disable condition -- positive tests") {

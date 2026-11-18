@@ -135,7 +135,7 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
     void handle(const ContinuousAssignSymbol& symbol) {
         if (!handleDefault(symbol))
             return;
-        symbol.getAssignment();
+        checkDeferredEventCalls(symbol.getAssignment(), symbol, "a continuous assignment"sv);
         symbol.getDelay();
     }
 
@@ -234,12 +234,21 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
 
         symbol.getDelay();
         symbol.checkInitializer();
+        if (auto init = symbol.getInitializer())
+            checkDeferredEventCalls(*init, symbol, "a net declaration assignment"sv);
     }
 
     void handle(const VariableSymbol& symbol) {
         if (!handleDefault(symbol))
             return;
         symbol.checkInitializer();
+        checkStaticInitializer(symbol);
+    }
+
+    void handle(const ClassPropertySymbol& symbol) {
+        if (!handleDefault(symbol))
+            return;
+        checkStaticInitializer(symbol);
     }
 
     void handle(const FormalArgumentSymbol& symbol) {
@@ -613,6 +622,102 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         entry.canonicalBody->noteCachedReuse();
         return true;
     }
+
+    // IEEE 1800-2023 13.4.4: a function may schedule an event that cannot become active until
+    // after it returns (a nonblocking assignment, a clocking drive, a `->>` trigger) only when
+    // the thread calling it was created by an initial or always procedure or a fork from one.
+    // A continuous assignment, a net declaration assignment and a static variable's
+    // initializer are not such threads, so a call from one to a function that contains such a
+    // statement, directly or through the functions it calls, is reported here; the static
+    // call target is followed (SVMake SLANG-13.4.4, K-1817).
+    struct DeferredEvent {
+        const SubroutineSymbol* sub = nullptr;
+        SourceRange range;
+    };
+
+    // The first deferred-event statement in `sub`'s body or in a function it calls, or none.
+    std::optional<DeferredEvent> findDeferredEvent(const SubroutineSymbol& sub) {
+        if (auto it = deferredEvents.find(&sub); it != deferredEvents.end())
+            return it->second;
+
+        // In progress: a recursive call finds nothing more through this path.
+        deferredEvents.emplace(&sub, std::nullopt);
+
+        std::optional<DeferredEvent> found;
+        auto visitor = makeVisitor(
+            [&](auto& v, const AssignmentExpression& expr) {
+                if (found)
+                    return;
+                if (expr.isNonBlocking()) {
+                    found = DeferredEvent{&sub, expr.sourceRange};
+                    return;
+                }
+                v.visitDefault(expr);
+            },
+            [&](auto& v, const EventTriggerStatement& stmt) {
+                if (found)
+                    return;
+                if (stmt.isNonBlocking) {
+                    found = DeferredEvent{&sub, stmt.sourceRange};
+                    return;
+                }
+                v.visitDefault(stmt);
+            },
+            [&](auto& v, const CallExpression& call) {
+                if (found)
+                    return;
+                if (!call.isSystemCall()) {
+                    if (auto callee = std::get<0>(call.subroutine)) {
+                        if (auto inner = findDeferredEvent(*callee)) {
+                            found = inner;
+                            return;
+                        }
+                    }
+                }
+                v.visitDefault(call);
+            });
+
+        auto& body = sub.getBody();
+        if (!body.bad())
+            body.visit(visitor);
+
+        deferredEvents[&sub] = found;
+        return found;
+    }
+
+    void checkDeferredEventCalls(const Expression& expr, const Symbol& symbol,
+                                 std::string_view contextName) {
+        // An uninstantiated block reports nothing, and binding the bodies its calls name
+        // (a class specialization made only there) would report errors of its own.
+        auto scope = symbol.getParentScope();
+        if (!scope || scope->isUninstantiated() || expr.bad())
+            return;
+
+        auto visitor = makeVisitor([&](auto& v, const CallExpression& call) {
+            if (!call.isSystemCall()) {
+                if (auto callee = std::get<0>(call.subroutine)) {
+                    if (auto found = findDeferredEvent(*callee)) {
+                        auto& diag = scope->addDiag(diag::DeferredEventCall, call.sourceRange);
+                        diag << callee->name << contextName;
+                        diag.addNote(diag::NoteDeferredEventHere, found->range)
+                            << found->sub->name;
+                        return;
+                    }
+                }
+            }
+            v.visitDefault(call);
+        });
+        expr.visit(visitor);
+    }
+
+    void checkStaticInitializer(const VariableSymbol& symbol) {
+        if (symbol.lifetime != VariableLifetime::Static)
+            return;
+        if (auto init = symbol.getInitializer())
+            checkDeferredEventCalls(*init, symbol, "a static variable initializer"sv);
+    }
+
+    flat_hash_map<const SubroutineSymbol*, std::optional<DeferredEvent>> deferredEvents;
 
     struct InstanceCacheEntry {
         not_null<const InstanceBodySymbol*> canonicalBody;
