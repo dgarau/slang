@@ -1162,8 +1162,7 @@ warning task-ignored ConstSysTaskIgnored "system task '{}' is ignored in constan
 warning constant-conversion ConstantConversion "implicit conversion from {} to {} changes value from {} to {}"
 
 subsystem Compilation
-warning deferred-event-call DeferredEventCall "function '{}' schedules a nonblocking assignment or trigger that cannot become active until after it returns, and is called from {}, which is not a thread created by an initial or always procedure (IEEE 1800-2023 13.4.4); accept it with -Wno-deferred-event-call"
-note NoteDeferredEventHere "scheduled here, in '{}'"
+warning deferred-event-call DeferredEventCall "function '{}' scheduled a nonblocking assignment, clocking drive or trigger from {}, which is not a thread created by an initial or always procedure (IEEE 1800-2023 13.4.4); accept it with -Wno-deferred-event-call"
 fatal MaxInstanceDepthExceeded "{} instantiation exceeded maximum depth of {}"
 fatal InfinitelyRecursiveHierarchy "infinitely recursive instantiation of '{}'"
 error InvalidTopModule "'{}' is not a valid top-level module"

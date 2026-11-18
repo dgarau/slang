@@ -12,6 +12,7 @@
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/Type.h"
+#include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/syntax/AllSyntax.h"
 
 TEST_CASE("Functions -- mixed param types") {
@@ -985,12 +986,14 @@ endmodule
 }
 
 
-TEST_CASE("SVMake SLANG-13.4.4: a function scheduling a nonblocking event, called from no procedure") {
-    // IEEE 1800-2023 13.4.4: calling a function that schedules an event that cannot become
-    // active until after it returns is allowed only from a thread an initial or always
-    // procedure (or a fork from one) created. A continuous assignment, a net declaration
-    // assignment and a static variable's initializer are no such thread. The check is by
-    // containment (decision 247 (b)): a deferred event on a branch never taken still counts.
+TEST_CASE("SVMake FRONT-1344b: 13.4.4 is checked when the event is scheduled, not by containment") {
+    // IEEE 1800-2023 13.4.4: calling a function that TRIES TO schedule an event that cannot
+    // become active until after it returns is an error unless an initial or always procedure
+    // (or a fork from one) created the calling thread; "at compile time or run time". Static
+    // containment rejected a deferred event on a branch never taken (q7 below), which the
+    // clause allows, so the check moved to the simulator, where the event is scheduled
+    // (SVMake decision 289 (b)). The front end reports nothing for any of these calls, and
+    // deferred-event-call stays a known option: it is the run-time error's escape.
     auto tree = SyntaxTree::fromText(R"(
 class K;
     static logic s;
@@ -1045,5 +1048,8 @@ endmodule
             lines.push_back(sm.getLineNumber(d.location));
     }
     std::ranges::sort(lines);
-    CHECK(lines == std::vector<size_t>{5, 22, 23, 24, 28, 29, 30, 31, 36});
+    CHECK(lines.empty());
+
+    DiagnosticEngine engine(sm);
+    CHECK(engine.findFromOptionName("deferred-event-call").size() == 1);
 }
