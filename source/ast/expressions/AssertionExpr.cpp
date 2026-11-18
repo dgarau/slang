@@ -1715,11 +1715,54 @@ AssertionExpr& DisableIffAssertionExpr::fromSyntax(const DisableIffSyntax& synta
     auto& cond = bindExpr(*syntax.expr, context);
 
     checkSampledValueExpr(cond, context, false, diag::DisableIffLocalVar, diag::DisableIffMatched);
+    checkSampledValueClocks(cond, context);
 
     if (context.assertionInstance && context.assertionInstance->isRecursive)
         context.addDiag(diag::RecursivePropDisableIff, syntax.sourceRange());
 
     return *comp.emplace<DisableIffAssertionExpr>(cond, expr);
+}
+
+void DisableIffAssertionExpr::checkSampledValueClocks(const Expression& condition,
+                                                      const ASTContext& context) {
+    // IEEE 1800-2023 16.12: "If a sampled value function other than $sampled is used in the
+    // disable condition, the sampling clock shall be explicitly specified in its actual
+    // argument list as described in 16.9.3." The clock of the property does not flow into
+    // the disable condition, and neither does a default clocking. The global clocking
+    // forms (16.9.4) name their clock and are not checked (SVMake K-1822).
+    auto visitor = makeVisitor([&](auto& v, const CallExpression& call) {
+        using parsing::KnownSystemName;
+        size_t clockArg;
+        switch (call.getKnownSystemName()) {
+            case KnownSystemName::Rose:
+            case KnownSystemName::Fell:
+            case KnownSystemName::Stable:
+            case KnownSystemName::Changed:
+                clockArg = 1;
+                break;
+            case KnownSystemName::Past:
+                clockArg = 3;
+                break;
+            default:
+                clockArg = SIZE_MAX;
+                break;
+        }
+
+        if (clockArg != SIZE_MAX) {
+            auto args = call.arguments();
+            if (args.size() <= clockArg || args[clockArg]->kind == ExpressionKind::EmptyArgument) {
+                context.addDiag(diag::DisableIffSampledNoClock, call.sourceRange)
+                    << call.getSubroutineName();
+            }
+        }
+
+        v.visitDefault(call);
+    },
+                               // A sequence or property instance is clocked in its own
+                               // right (its calls are checked by the analysis), so the
+                               // walk does not enter its body.
+                               [&](auto&, const AssertionInstanceExpression&) {});
+    condition.visit(visitor);
 }
 
 bool DisableIffAssertionExpr::isEquivalentImpl(const DisableIffAssertionExpr& rhs) const {

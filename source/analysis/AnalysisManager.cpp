@@ -486,7 +486,9 @@ void AnalysisManager::NonProceduralExprVisitor::visitCall(const CallExpression& 
     if (ClockInference::isSampledValueFuncCall(expr)) {
         // If we don't have a default clocking active in this scope then
         // we should check the call to be sure it has an explicit clock provided.
-        if (getDefaultClocking() == nullptr)
+        // A call directly in a disable condition is checked when the condition is bound
+        // (DisableIffSampledNoClock, IEEE 1800-2023 16.12; SVMake K-1822).
+        if (!(isDisableCondition && instanceDepth == 0) && getDefaultClocking() == nullptr)
             ClockInference::checkSampledValueFuncs(state.context, containingSymbol, expr);
     }
 

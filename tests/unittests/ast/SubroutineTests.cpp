@@ -901,3 +901,60 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::ExpectedFunctionPort);
 }
+
+TEST_CASE("SVMake SLANG-13.4.4: a function scheduling a nonblocking event, called from no procedure") {
+    // IEEE 1800-2023 13.4.4: calling a function that schedules an event that cannot become
+    // active until after it returns is allowed only from a thread an initial or always
+    // procedure (or a fork from one) created. A continuous assignment, a net declaration
+    // assignment and a static variable's initializer are no such thread.
+    auto tree = SyntaxTree::fromText(R"(
+class K;
+    static logic s;
+    static function logic m(logic v); s <= v; return v; endfunction
+endclass
+
+module t;
+    logic q1, q2, q3, q4, q5, q6, z, r;
+    event e;
+    function automatic logic leaf(logic v); r <= v; return v; endfunction
+    function automatic logic mid(logic v); return leaf(v); endfunction
+    function automatic logic trig(logic v); ->> e; return v; endfunction
+    function automatic int rec(int n); if (n > 0) return rec(n - 1); return 0; endfunction
+    function automatic logic blk(logic v); r = v; return v; endfunction
+    function automatic logic trigb(logic v); -> e; return v; endfunction
+    assign q1 = mid(z);              // 1: through a call
+    assign q2 = trig(z);             // 2: ->>
+    assign q3 = K::m(z);             // 3: a class method
+    assign q4 = rec(3) == 0;         // recursion, nothing scheduled
+    assign q5 = blk(z);              // a blocking assignment
+    assign q6 = trigb(z);            // a blocking trigger
+    wire w = leaf(z);                // 4: a net declaration assignment
+    logic sv = leaf(1'b0);           // 5: a static initializer
+    always @(z) q1 = leaf(z);
+    always_comb q2 = mid(z);
+    initial begin
+        automatic logic a = leaf(1'b1);
+        static logic b = leaf(1'b1); // 6: a static initializer in a procedure
+        fork q3 = leaf(a); join_none
+    end
+    if (0) begin : g
+        assign q4 = leaf(z);         // uninstantiated
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    int count = 0, other = 0;
+    for (auto& d : diags) {
+        if (d.code == diag::DeferredEventCall)
+            count++;
+        else
+            other++;
+    }
+    CHECK(count == 6);
+    // q1..q3 have procedural and continuous drivers, which is its own error.
+    CHECK(other == diags.size() - 6);
+}

@@ -2020,3 +2020,44 @@ endmodule
     CHECK(other == 7);
     CHECK(diags.size() == 9);
 }
+
+TEST_CASE("SVMake K-1822: a sampled value function in a disable condition names its clock") {
+    // IEEE 1800-2023 16.12: "If a sampled value function other than $sampled is used in the
+    // disable condition, the sampling clock shall be explicitly specified in its actual
+    // argument list as described in 16.9.3." Neither the property's clock nor a default
+    // clocking flows into the condition; a default disable iff is a disable condition too.
+    auto tree = SyntaxTree::fromText(R"(
+module m;
+    bit clk, rst, a;
+    assert property (@(posedge clk) disable iff ($past(rst)) a);                         // 1
+    assert property (@(posedge clk) disable iff ($rose(rst)) a);                         // 2
+    assert property (@(posedge clk) disable iff ($fell(rst) || $stable(rst)) a);         // 3, 4
+    assert property (@(posedge clk) disable iff ($changed(rst)) a);                      // 5
+    assert property (@(posedge clk) disable iff ($past(rst, 2, 1'b1)) a);                // 6
+    assert property (@(posedge clk) disable iff ($sampled(rst)) a);
+    assert property (@(posedge clk) disable iff ($rose(rst, @(posedge clk))) a);
+    assert property (@(posedge clk) disable iff ($past(rst, 1, 1'b1, @(posedge clk))) a);
+    assert property (@(posedge clk) disable iff (rst) a ##1 $rose(a));
+endmodule
+
+module n;
+    bit clk, rst, a;
+    default clocking cb @(posedge clk); endclocking
+    default disable iff ($fell(rst));                                                    // 7
+    assert property (disable iff ($stable(rst)) a);                                      // 8
+    assert property (disable iff ($stable(rst, @(posedge clk))) a);
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    int count = 0;
+    for (auto& d : diags) {
+        if (d.code == diag::DisableIffSampledNoClock)
+            count++;
+    }
+    CHECK(count == 8);
+    CHECK(diags.size() == 8);
+}

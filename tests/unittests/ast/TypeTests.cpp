@@ -3076,3 +3076,37 @@ endmodule
     CHECK(!signedOf("t_anon_inner"));
     CHECK(signedOf("t_nn_elem"));
 }
+
+TEST_CASE("SVMake K-1721: no member defaults in an unpacked struct containing a union") {
+    // IEEE 1800-2023 7.2.2: "Members of unpacked structures containing a union as well as
+    // members of packed structures shall not be assigned individual default member values."
+    auto tree = SyntaxTree::fromText(R"(
+typedef union packed { int x; int y; } pu_t;
+typedef union { int x; real r; } uu_t;
+typedef struct { int a = 1; } plain_t;
+typedef struct { uu_t u; int k; } nodef_t;
+
+module m;
+    struct { union { int x; int y; } u; int k = 5; } s1;          // 1: unpacked union member
+    struct { pu_t u; int k = 5; int j = 6; } s2;                  // 2: packed union, two defaults
+    struct { uu_t u[2]; int k = 5; } s3;                          // 1: fixed array of unions
+    struct { pu_t u = 0; int k; } s4;                             // 1: the union member's own default
+    plain_t s5;                                                   // 0: no union
+    nodef_t s6;                                                   // 0: a union, no defaults
+    struct { nodef_t inner; int k = 5; } s7;                      // 0: the union is inside a member
+    struct { uu_t q[$]; int k = 5; } s8;                          // 0: a queue is not stored inline
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+
+    auto& diags = compilation.getAllDiagnostics();
+    int count = 0;
+    for (auto& d : diags) {
+        if (d.code == diag::UnionStructMemberInitializer)
+            count++;
+    }
+    CHECK(count == 5);
+    CHECK(diags.size() == 5);
+}
