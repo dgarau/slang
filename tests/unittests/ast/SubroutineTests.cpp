@@ -989,39 +989,48 @@ TEST_CASE("SVMake SLANG-13.4.4: a function scheduling a nonblocking event, calle
     // IEEE 1800-2023 13.4.4: calling a function that schedules an event that cannot become
     // active until after it returns is allowed only from a thread an initial or always
     // procedure (or a fork from one) created. A continuous assignment, a net declaration
-    // assignment and a static variable's initializer are no such thread.
+    // assignment and a static variable's initializer are no such thread. The check is by
+    // containment (decision 247 (b)): a deferred event on a branch never taken still counts.
     auto tree = SyntaxTree::fromText(R"(
 class K;
     static logic s;
     static function logic m(logic v); s <= v; return v; endfunction
+    static logic t = m(1'b0);        // static class property initializer
 endclass
 
-module t;
-    logic q1, q2, q3, q4, q5, q6, z, r;
+module top;
+    logic q1, q2, q3, q4, q5, q6, q7, q8, z, r;
     event e;
+    bit clk;
+    logic d;
+    clocking cb @(posedge clk); output d; endclocking
     function automatic logic leaf(logic v); r <= v; return v; endfunction
     function automatic logic mid(logic v); return leaf(v); endfunction
     function automatic logic trig(logic v); ->> e; return v; endfunction
     function automatic int rec(int n); if (n > 0) return rec(n - 1); return 0; endfunction
     function automatic logic blk(logic v); r = v; return v; endfunction
     function automatic logic trigb(logic v); -> e; return v; endfunction
-    assign q1 = mid(z);              // 1: through a call
-    assign q2 = trig(z);             // 2: ->>
-    assign q3 = K::m(z);             // 3: a class method
-    assign q4 = rec(3) == 0;         // recursion, nothing scheduled
-    assign q5 = blk(z);              // a blocking assignment
-    assign q6 = trigb(z);            // a blocking trigger
-    wire w = leaf(z);                // 4: a net declaration assignment
-    logic sv = leaf(1'b0);           // 5: a static initializer
-    always @(z) q1 = leaf(z);
-    always_comb q2 = mid(z);
+    function automatic logic dead(logic v, bit en); if (en) r <= v; return v; endfunction
+    function automatic logic drv(logic v); cb.d <= v; return v; endfunction
+    assign q1 = mid(z);              // through a call
+    assign q2 = trig(z);             // ->>
+    assign q3 = K::m(z);             // a class method
+    assign q4 = rec(3) == 0;
+    assign q5 = blk(z);
+    assign q6 = trigb(z);
+    assign q7 = dead(z, 1'b0);       // containment: a branch never taken
+    assign q8 = drv(z);              // a clocking drive
+    wire w = leaf(z);                // a net declaration assignment
+    logic sv = leaf(1'b0);           // a static initializer
+    always @(z) r = leaf(z);
+    always_comb d = mid(z);
     initial begin
         automatic logic a = leaf(1'b1);
-        static logic b = leaf(1'b1); // 6: a static initializer in a procedure
-        fork q3 = leaf(a); join_none
+        static logic b = leaf(1'b1); // a static initializer in a procedure
+        fork r = leaf(a); join_none
     end
     if (0) begin : g
-        assign q4 = leaf(z);         // uninstantiated
+        assign q4 = leaf(z);
     end
 endmodule
 )");
@@ -1029,15 +1038,12 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
-    auto& diags = compilation.getAllDiagnostics();
-    int count = 0, other = 0;
-    for (auto& d : diags) {
+    auto& sm = SyntaxTree::getDefaultSourceManager();
+    std::vector<size_t> lines;
+    for (auto& d : compilation.getAllDiagnostics()) {
         if (d.code == diag::DeferredEventCall)
-            count++;
-        else
-            other++;
+            lines.push_back(sm.getLineNumber(d.location));
     }
-    CHECK(count == 6);
-    // q1..q3 have procedural and continuous drivers, which is its own error.
-    CHECK(other == diags.size() - 6);
+    std::ranges::sort(lines);
+    CHECK(lines == std::vector<size_t>{5, 22, 23, 24, 28, 29, 30, 31, 36});
 }
