@@ -2047,17 +2047,34 @@ module n;
     assert property (disable iff ($stable(rst)) a);                                      // 8
     assert property (disable iff ($stable(rst, @(posedge clk))) a);
 endmodule
+
+checker chk1(logic a, logic dis, event clk);
+    a1: assert property (@clk disable iff (dis) a);                                      // 9
+endchecker
+
+checker chk2(logic a, logic dis, event clk);
+    a2: assert property (@clk disable iff (dis) a);
+endchecker
+
+module c;
+    bit clk, rst, a;
+    chk1 c1(a, $rose(rst), posedge clk);
+    chk2 c2(a, $rose(rst, @(posedge clk)), posedge clk);
+endmodule
 )");
 
     Compilation compilation;
     compilation.addSyntaxTree(tree);
 
+    // A checker's actual is reported where the formal is used, inside the checker body (9).
+    auto& sm = SyntaxTree::getDefaultSourceManager();
     auto& diags = compilation.getAllDiagnostics();
-    int count = 0;
+    std::vector<size_t> lines;
     for (auto& d : diags) {
         if (d.code == diag::DisableIffSampledNoClock)
-            count++;
+            lines.push_back(sm.getLineNumber(d.location));
     }
-    CHECK(count == 8);
-    CHECK(diags.size() == 8);
+    std::ranges::sort(lines);
+    CHECK(lines == std::vector<size_t>{4, 5, 6, 6, 7, 8, 18, 19, 24});
+    CHECK(diags.size() == 9);
 }
