@@ -1275,8 +1275,18 @@ Expression& Expression::bindLookupResult(Compilation& comp, LookupResult& result
     // containing instance can't share a cached body. Value expressions note this
     // themselves; a subroutine can also be found upward by its simple name.
     auto noteIfUpward = [&](const Expression& target) {
-        if (result.upwardCount == 0)
+        if (result.upwardCount == 0) {
+            // SVMake FRONT-298: an absolute name can make a body unshareable too.
+            if (!result.flags.has(LookupResultFlags::IsHierarchical))
+                return;
+
+            auto ref = comp.emplace<HierarchicalReference>(
+                HierarchicalReference::fromLookup(comp, result));
+            ref->target = symbol;
+            ref->expr = &target;
+            comp.noteAbsoluteReference(*context.scope, *ref);
             return;
+        }
 
         auto ref = comp.emplace<HierarchicalReference>(
             HierarchicalReference::fromLookup(comp, result));

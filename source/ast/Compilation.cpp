@@ -1623,6 +1623,62 @@ void Compilation::noteUpwardReference(const Scope& initialScope, const Hierarchi
     }
 }
 
+void Compilation::noteAbsoluteReference(const Scope& initialScope,
+                                        const HierarchicalReference& ref) {
+    SLANG_ASSERT(!isFrozen());
+    if (ref.isUpward() || ref.isViaIfacePort() || ref.path.empty())
+        return;
+
+    // SVMake FRONT-298: only an absolute name -- one whose head is a top-level instance --
+    // names the same target from every instance of the enclosing bodies. ($root. names are
+    // upward and already noted by noteUpwardReference.)
+    auto& head = *ref.path[0].symbol;
+    if (head.kind != SymbolKind::Instance)
+        return;
+    auto headParent = head.getParentScope();
+    if (!headParent || headParent->asSymbol().kind != SymbolKind::Root)
+        return;
+
+    // The definitions of every instance body enclosing the reference. A type declared in
+    // one of those bodies is a different type in each instance (8.25, 6.22), and the target
+    // can only carry such a type if its path passes through an instance of that definition.
+    SmallVector<const InstanceBodySymbol*> bodies;
+    SmallSet<const DefinitionSymbol*, 4> definitions;
+    for (auto currScope = &initialScope; currScope;) {
+        auto& sym = currScope->asSymbol();
+        if (sym.kind == SymbolKind::Root)
+            break;
+        if (sym.kind == SymbolKind::InstanceBody) {
+            // A top-level instance has no replica to share a body with, and every absolute
+            // name passes through one, so it is left out.
+            auto& body = sym.as<InstanceBodySymbol>();
+            auto parentInst = body.parentInstance;
+            auto instParent = parentInst ? parentInst->getParentScope() : nullptr;
+            if (!instParent || instParent->asSymbol().kind != SymbolKind::Root) {
+                bodies.push_back(&body);
+                definitions.emplace(&body.getDefinition());
+            }
+        }
+        currScope = sym.getHierarchicalParent();
+    }
+
+    bool crosses = false;
+    for (auto& elem : ref.path) {
+        if (elem.symbol->kind == SymbolKind::Instance &&
+            definitions.contains(&elem.symbol->as<InstanceSymbol>().getDefinition())) {
+            crosses = true;
+            break;
+        }
+    }
+    if (!crosses)
+        return;
+
+    // Every enclosing body below the top: a replica can be shared at any level above the
+    // reference, as for a $root. name.
+    for (auto body : bodies)
+        getOrAddSideEffects(*body).crossInstanceNames.push_back(&ref);
+}
+
 void Compilation::noteHierarchicalAssignment(const HierarchicalReference& ref) {
     SLANG_ASSERT(!isFrozen());
     hierarchicalAssignments.push_back(&ref);

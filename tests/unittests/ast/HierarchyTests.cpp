@@ -3524,3 +3524,207 @@ endmodule
     compilation.addSyntaxTree(tree);
     NO_COMPILATION_ERRORS;
 }
+
+// SVMake FRONT-298 (decision 298 (a)): a class (or any type) declared in a module is a different
+// type in each instance (IEEE 1800-2023 8.25, 6.22.1). An ABSOLUTE name -- headed by a top-level
+// instance -- names the same target from every instance of a replicated body, so a typed handoff
+// through it can be legal in the canonical instance and illegal in its replicas (15.4.9: a
+// parameterized mailbox is type-checked at compile time). Such a body must not be shared, the same
+// as one holding an upward name.
+static std::vector<DiagCode> front298Errors(std::string_view text) {
+    auto tree = SyntaxTree::fromText(text);
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    std::vector<DiagCode> codes;
+    for (auto& diag : compilation.getAllDiagnostics()) {
+        if (diag.isError())
+            codes.push_back(diag.code);
+    }
+    return codes;
+}
+
+TEST_CASE("SVMake FRONT-298: an absolute name into a sibling instance is checked in every replica") {
+    using Codes = std::vector<DiagCode>;
+
+    // Every case is a name that is INVOKED (a method of a value, or a subroutine): those are
+    // looked up with AllowDeclaredAfter, find the top-level instance in the root and are not
+    // upward. A plain value spelled the same way is found upward and was already checked per
+    // instance (the last case, a control).
+
+    // The typed mailbox get of c1's K into c2's K, written in the replicated body.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K got;
+  initial t.c1.box.get(got);
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::RefTypeMismatch});
+
+    // The same in a child of the replicated body (cmod.got is upward, but only out of sub).
+    CHECK(front298Errors(R"(
+module sub; initial t.c1.box.get(cmod.got); endmodule
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K got;
+  sub s();
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::RefTypeMismatch});
+
+    // A put of c2's K into c1's mailbox.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K h;
+  initial t.c1.box.put(h);
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::BadAssignment});
+
+    // A typed queue's pop.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  K q[$];
+  K got;
+  initial got = t.c1.q.pop_front();
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::BadAssignment});
+
+    // A task of the sibling with a K output.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  K h, got;
+  task automatic take(output K o); o = h; endtask
+  initial t.c1.take(got);
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::BadAssignment});
+
+    // The sharing is one level up (two wrappers), through an instance array, through a
+    // generate loop.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K got;
+  initial t.w1.c.box.get(got);
+endmodule
+module w; cmod c(); endmodule
+module t; w w1(); w w2(); endmodule
+)") == Codes{diag::RefTypeMismatch});
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K got;
+  initial t.c[0].box.get(got);
+endmodule
+module t; cmod c[2](); endmodule
+)") == Codes{diag::RefTypeMismatch});
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox #(K) box = new;
+  K got;
+  initial t.g[0].c.box.get(got);
+endmodule
+module t; for (genvar i = 0; i < 2; i++) begin : g cmod c(); end endmodule
+)") == Codes{diag::RefTypeMismatch});
+
+    // A struct and an enum declared in the body are per-instance types too, returned by a
+    // function of the sibling.
+    CHECK(front298Errors(R"(
+module cmod;
+  typedef struct { int a; } S;
+  typedef enum { A, B } E;
+  S s, sg;
+  E e, eg;
+  function S fs(); return s; endfunction
+  function E fe(); return e; endfunction
+  initial begin sg = t.c1.fs(); eg = t.c1.fe(); end
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::NoImplicitConversion, diag::NoImplicitConversion});
+
+    // Compile-legal: a typeless mailbox (15.4.5's check is at run time), a $cast (8.16), an int.
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  mailbox box = new;
+  int q[$];
+  K h, got;
+  int v;
+  initial begin
+    void'(t.c1.box.try_get(got));
+    void'($cast(got, t.c1.h));
+    v = t.c1.q.pop_front();
+  end
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)").empty());
+
+    // Control: the plain value spelling (found upward).
+    CHECK(front298Errors(R"(
+module cmod;
+  class K; endclass
+  K h, got;
+  initial got = t.c1.h;
+endmodule
+module t; cmod c1(); cmod c2(); endmodule
+)") == Codes{diag::BadAssignment});
+}
+
+TEST_CASE("SVMake FRONT-298: which bodies an absolute name keeps from being shared") {
+    // A plain value spelled t.x.y is found by upward lookup (through the top's definition name)
+    // and was never shared. A name that is invoked -- a subroutine, or a method of a value -- is
+    // looked up with AllowDeclaredAfter, which finds the top-level instance in the root, so it is
+    // not upward; these are the spellings the change is about.
+    auto tree = SyntaxTree::fromText(R"(
+module a; function void f(); endfunction initial t.a1.f(); endmodule
+module b; initial t.f(); endmodule
+module c; function void f(); endfunction endmodule
+module d; function void g(); endfunction initial t.c1.f(); endmodule
+module w; d dd(); endmodule
+module e; initial t.w1.dd.g(); endmodule
+module q; int q[$]; int x; initial x = t.q1.q.pop_front(); endmodule
+module t;
+  function void f(); endfunction
+  a a1(), a2();
+  b b1(), b2();
+  c c1(), c2();
+  d d1(), d2();
+  w w1(), w2();
+  e e1(), e2();
+  q q1(), q2();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    auto shared = [&](std::string_view name) {
+        return root.lookupName<InstanceSymbol>(name).getCanonicalBody() != nullptr;
+    };
+
+    // a calls through an instance of its own definition: not shared.
+    CHECK(!shared("t.a2"));
+    // A method of a value in an instance of its own definition: not shared.
+    CHECK(!shared("t.q2"));
+    // b names only the top (left out: nothing replicates it) and c names nothing: shared.
+    CHECK(shared("t.b2"));
+    CHECK(shared("t.c2"));
+    // d calls into an instance of another definition (c): shared, and so is w around it.
+    CHECK(shared("t.d2"));
+    CHECK(shared("t.w2"));
+    // e passes through instances of w and d, neither of which encloses it: shared.
+    CHECK(shared("t.e2"));
+}

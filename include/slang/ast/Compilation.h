@@ -726,6 +726,13 @@ public:
     /// among other things, to ensure we perform instance caching correctly.
     void noteUpwardReference(const Scope& scope, const HierarchicalReference& ref);
 
+    /// Notes a hierarchical reference that is not upward. If it is absolute (its head is a
+    /// top-level instance) and passes through an instance of the definition of any instance
+    /// body enclosing @a scope, the enclosing bodies can't share a cached body: the reference
+    /// names the same symbol from every instance, but the types declared in each instance's
+    /// body differ (8.25, 6.22), so it can be legal in one instance and not in another.
+    void noteAbsoluteReference(const Scope& scope, const HierarchicalReference& ref);
+
     /// Notes the existence of an assignment to a hierarchical reference.
     void noteHierarchicalAssignment(const HierarchicalReference& ref);
 
@@ -960,6 +967,10 @@ private:
     struct InstanceSideEffects {
         // All upward names that extend out of the instance.
         std::vector<const HierarchicalReference*> upwardNames;
+
+        // Absolute names that pass through an instance of the definition of this
+        // instance or of one of its ancestors (see noteAbsoluteReference).
+        std::vector<const HierarchicalReference*> crossInstanceNames;
 
         // Indicates whether this instance can't be cached
         // due to something like declaring bind directives

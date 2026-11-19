@@ -561,6 +561,8 @@ HierarchicalValueExpression::HierarchicalValueExpression(const Scope& scope,
     HierarchicalValueExpression(symbol, ref, sourceRange) {
     if (this->ref.isUpward())
         scope.getCompilation().noteUpwardReference(scope, this->ref);
+    else
+        scope.getCompilation().noteAbsoluteReference(scope, this->ref);
 }
 
 ConstantValue HierarchicalValueExpression::evalImpl(EvalContext& context) const {
@@ -634,6 +636,8 @@ ArbitrarySymbolExpression::ArbitrarySymbolExpression(const Scope& scope, const S
 
         if (this->hierRef.isUpward())
             scope.getCompilation().noteUpwardReference(scope, this->hierRef);
+        else
+            scope.getCompilation().noteAbsoluteReference(scope, this->hierRef);
     }
 }
 

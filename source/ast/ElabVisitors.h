@@ -588,7 +588,10 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         // This could be optimized in the future by having another layer of caching based
         // on what the name resolves to for each instance.
         auto sideEffects = entry.sideEffects.value();
-        if (sideEffects && (sideEffects->cannotCache || !sideEffects->upwardNames.empty())) {
+        // SVMake FRONT-298: the same for an absolute name that passes through an instance of
+        // this body's definition (or an ancestor's): its legality can differ per instance.
+        if (sideEffects && (sideEffects->cannotCache || !sideEffects->upwardNames.empty() ||
+                            !sideEffects->crossInstanceNames.empty())) {
             return false;
         }
 
