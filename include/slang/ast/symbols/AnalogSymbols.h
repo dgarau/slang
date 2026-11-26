@@ -54,7 +54,7 @@ public:
     std::string_view getUnits() const;
 
     /// The absolute tolerance (inherited from the parent when not set).
-    std::optional<double> getAbstol() const;
+    std::optional<double> getAbsTol() const;
 
     /// The time-derivative and time-integral natures (default: the nature itself).
     const NatureSymbol* getDdtNature() const;

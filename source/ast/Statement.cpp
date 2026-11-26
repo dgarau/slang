@@ -320,9 +320,14 @@ const Statement& Statement::bind(const StatementSyntax& syntax, const ASTContext
                 break;
             case StatementKind::ExpressionStatement: {
                 auto& expr = result->as<ExpressionStatement>().expr;
-                if (expr.kind == ExpressionKind::Assignment &&
-                    expr.as<AssignmentExpression>().isNonBlocking()) {
-                    what = "a nonblocking assignment"sv;
+                if (expr.kind == ExpressionKind::Assignment) {
+                    auto& assign = expr.as<AssignmentExpression>();
+                    if (assign.isNonBlocking())
+                        what = "a nonblocking assignment"sv;
+                    // A.6.2: analog_variable_assignment ::= lvalue = analog_expression has no
+                    // intra-assignment delay or event control (in analog and analog initial).
+                    else if (assign.timingControl)
+                        what = "a timing control in an assignment"sv;
                 }
                 break;
             }

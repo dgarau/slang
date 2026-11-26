@@ -181,12 +181,13 @@ void InvalidTimingControl::serializeTo(ASTSerializer& serializer) const {
 
 // SVMake VAMS P0.1: VAMS-2023 2.6.2, scale factors are not allowed in digital delays
 // (#5u, #(5u)). Only Verilog-AMS source lexes them: a real literal whose text ends in a
-// Table 2-1 letter.
+// Table 2-1 letter. That holds wherever a macro carries such a literal (a $unit class, say), so
+// there is no scope gate; SystemVerilog lexing never produces one.
 static void checkScaledDelay(const ExpressionSyntax& syntax, const ASTContext& context) {
     const ExpressionSyntax* expr = &syntax;
     while (expr->kind == SyntaxKind::ParenthesizedExpression)
         expr = expr->as<ParenthesizedExpressionSyntax>().expression;
-    if (expr->kind != SyntaxKind::RealLiteralExpression || !isVamsScope(*context.scope))
+    if (expr->kind != SyntaxKind::RealLiteralExpression)
         return;
 
     auto raw = expr->as<LiteralExpressionSyntax>().literal.rawText();

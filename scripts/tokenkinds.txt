@@ -433,7 +433,7 @@ TimerKeyword
 TransitionKeyword
 UnitsKeyword
 WhiteNoiseKeyword
-WrealKeyword
+WRealKeyword
 ZiNdKeyword
 ZiNpKeyword
 ZiZdKeyword

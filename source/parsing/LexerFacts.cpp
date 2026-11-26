@@ -422,7 +422,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "transition", TokenKind::TransitionKeyword },\
     { "units", TokenKind::UnitsKeyword },\
     { "white_noise", TokenKind::WhiteNoiseKeyword },\
-    { "wreal", TokenKind::WrealKeyword },\
+    { "wreal", TokenKind::WRealKeyword },\
     { "zi_nd", TokenKind::ZiNdKeyword },\
     { "zi_np", TokenKind::ZiNpKeyword },\
     { "zi_zd", TokenKind::ZiZdKeyword },\
@@ -839,7 +839,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::TransitionKeyword:
         case TokenKind::UnitsKeyword:
         case TokenKind::WhiteNoiseKeyword:
-        case TokenKind::WrealKeyword:
+        case TokenKind::WRealKeyword:
         case TokenKind::ZiNdKeyword:
         case TokenKind::ZiNpKeyword:
         case TokenKind::ZiZdKeyword:
@@ -1335,7 +1335,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::TransitionKeyword: return "transition";
         case TokenKind::UnitsKeyword: return "units";
         case TokenKind::WhiteNoiseKeyword: return "white_noise";
-        case TokenKind::WrealKeyword: return "wreal";
+        case TokenKind::WRealKeyword: return "wreal";
         case TokenKind::ZiNdKeyword: return "zi_nd";
         case TokenKind::ZiNpKeyword: return "zi_np";
         case TokenKind::ZiZdKeyword: return "zi_zd";

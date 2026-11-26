@@ -224,15 +224,15 @@ enum class SLANG_EXPORT AnalogBuiltinKind : uint8_t {
     Ddt,
     Idt,
     Transition,
-    Limexp,
+    LimExp,
     Analysis,
-    Abstime,
+    AbsTime,
     InitialStep,
     FinalStep,
     Cross,
     Above,
     Timer,
-    Absdelta,
+    AbsDelta,
     Unsupported
 };
 

@@ -242,7 +242,7 @@ public:
 // $abstime (VAMS-2023 9.10): absolute simulation time in seconds, a real.
 class AbstimeFunction : public AnalogBuiltin {
 public:
-    AbstimeFunction() : AnalogBuiltin("$abstime", AnalogBuiltinKind::Abstime) {}
+    AbstimeFunction() : AnalogBuiltin("$abstime", AnalogBuiltinKind::AbsTime) {}
 
     const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
                                const Expression*) const final {
@@ -367,7 +367,7 @@ void Builtins::registerAnalogFuncs() {
     add(TokenKind::TransitionKeyword,
         std::make_shared<AnalogOperatorFunction>("transition", AK::Transition, 1, 5));
     add(TokenKind::LimExpKeyword,
-        std::make_shared<AnalogOperatorFunction>("limexp", AK::Limexp, 1, 1));
+        std::make_shared<AnalogOperatorFunction>("limexp", AK::LimExp, 1, 1));
     add(TokenKind::AnalysisKeyword, std::make_shared<AnalysisFunction>());
     add(TokenKind::InitialStepKeyword,
         std::make_shared<AnalogEventFunction>("initial_step", AK::InitialStep));

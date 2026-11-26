@@ -1357,7 +1357,7 @@ error AnalogOperatorInEvent "the analog operator '{}' is not allowed in an event
 error NestedAnalogEvent "an event control cannot be nested in the statement of an analog event control"
 error ContributionValueNotNumeric "the value of a contribution must be a numeric expression"
 error NatureCycle "nature '{}' is derived from itself"
-error NatureAbstolNotNumeric "the abstol attribute of a nature must be a numeric constant"
+error NatureAbsTolNotNumeric "the abstol attribute of a nature must be a numeric constant"
 error BranchTooManyTerminals "a branch has one or two terminals"
 error NetDeclaredInBlock "a net cannot be declared local to a block"
 note NoteBodiesDifferInMacro "the bodies differ in the expansion of macro '{}'"

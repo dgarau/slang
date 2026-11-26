@@ -95,7 +95,7 @@ void NatureSymbol::resolve() const {
         }
     }
 
-    bool hasAccess = false, hasUnits = false, hasAbstol = false;
+    bool hasAccess = false, hasUnits = false, hasAbsTol = false;
     SmallVector<UserAttribute> users;
     for (auto item : decl.items) {
         auto attrName = item->name.valueText();
@@ -143,12 +143,12 @@ void NatureSymbol::resolve() const {
                 if (expr.bad()) {
                 }
                 else if (expr.kind == ExpressionKind::StringLiteral || !expr.type->isNumeric()) {
-                    scope->addDiag(diag::NatureAbstolNotNumeric, value.sourceRange());
+                    scope->addDiag(diag::NatureAbsTolNotNumeric, value.sourceRange());
                 }
                 else if (auto cv = context.eval(expr)) {
                     abstol = cv.convertToReal().real();
                 }
-                hasAbstol = true;
+                hasAbsTol = true;
                 break;
             }
             case TokenKind::DdtNatureKeyword:
@@ -177,8 +177,8 @@ void NatureSymbol::resolve() const {
         // Inherited attributes (3.6.1.1, 3.6.1.2).
         accessName = parent->getAccessName();
         units = parent->getUnits();
-        if (!hasAbstol)
-            abstol = parent->getAbstol();
+        if (!hasAbsTol)
+            abstol = parent->getAbsTol();
         if (ddtName.empty() && parent->getDdtNature() != parent)
             ddtName = parent->getDdtNature() ? parent->getDdtNature()->name : ""sv;
         if (idtName.empty() && parent->getIdtNature() != parent)
@@ -189,7 +189,7 @@ void NatureSymbol::resolve() const {
         auto missing = [&](std::string_view attr) {
             scope->addDiag(diag::NatureMissingAttribute, location) << name << attr;
         };
-        if (!hasAbstol)
+        if (!hasAbsTol)
             missing("abstol"sv);
         if (!hasAccess)
             missing("access"sv);
@@ -227,7 +227,7 @@ std::string_view NatureSymbol::getUnits() const {
     return units;
 }
 
-std::optional<double> NatureSymbol::getAbstol() const {
+std::optional<double> NatureSymbol::getAbsTol() const {
     resolve();
     return abstol;
 }
@@ -260,7 +260,7 @@ void NatureSymbol::serializeTo(ASTSerializer& serializer) const {
         serializer.writeLink("parent", *p);
     serializer.write("access", getAccessName());
     serializer.write("units", getUnits());
-    if (auto a = getAbstol())
+    if (auto a = getAbsTol())
         serializer.write("abstol", *a);
     if (auto d = getDdtNature(); d && d != this)
         serializer.writeLink("ddtNature", *d);

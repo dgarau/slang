@@ -87,7 +87,7 @@ module m; endmodule
     CHECK(base->getParent() == nullptr);
     CHECK(base->getAccessName() == "Bx");
     CHECK(base->getUnits() == "u");
-    CHECK(base->getAbstol() == 1e-3);
+    CHECK(base->getAbsTol() == 1e-3);
     CHECK(base->getIdtNature() == base);
     CHECK(base->getDdtNature() == base);
     REQUIRE(base->getUserAttributes().size() == 1);
@@ -97,9 +97,9 @@ module m; endmodule
     CHECK(&derived->getBase() == base);
     CHECK(derived->getAccessName() == "Bx");
     CHECK(derived->getUnits() == "u");
-    CHECK(derived->getAbstol() == 1e-6);
+    CHECK(derived->getAbsTol() == 1e-6);
     CHECK(fromDisc->getParent() == derived);
-    CHECK(fromDisc->getAbstol() == 1e-6);
+    CHECK(fromDisc->getAbsTol() == 1e-6);
 
     auto bd = compilation.getDiscipline("bd");
     REQUIRE(bd);
@@ -193,7 +193,7 @@ endmodule
         REQUIRE(electrical->getFlow());
         CHECK(electrical->getPotential()->name == "Voltage");
         CHECK(electrical->getPotential()->getAccessName() == "V");
-        CHECK(electrical->getPotential()->getAbstol() == 1e-6);
+        CHECK(electrical->getPotential()->getAbsTol() == 1e-6);
         CHECK(electrical->getFlow()->name == "Current");
         CHECK(electrical->getFlow()->getAccessName() == "I");
         CHECK(electrical->getFlow()->getIdtNature() == compilation.getNature("Charge"));
@@ -1167,7 +1167,7 @@ endmodule
     auto c = codes(compilation);
     auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
     CHECK(count(diag::NatureCycle) >= 1);
-    CHECK(count(diag::NatureAbstolNotNumeric) == 1);
+    CHECK(count(diag::NatureAbsTolNotNumeric) == 1);
     CHECK(count(diag::ScaledDelay) == 3);
     CHECK(count(diag::BranchTooManyTerminals) == 1);
     CHECK(count(diag::BranchTerminalNotNet) == 0);
@@ -1230,4 +1230,53 @@ TEST_CASE("VAMS constants.vams marks itself as a modified copy (CR-L11)") {
           std::string::npos);
     CHECK(text.find("this marker line, and layout whitespace") != std::string::npos);
     CHECK(text.find("\xE2\x80\x98") == std::string::npos); // no U+2018 left
+}
+
+// ----- C6: C5 re-check fixes -----
+
+TEST_CASE("VAMS intra-assignment timing controls in analog code (C5-M1)") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real x, y;
+    analog begin
+        x = @(cross(V(a), 1)) 1.0;
+        y = #1 2.0;
+        V(a) <+ x + y;
+    end
+    analog initial begin
+        x = #1 3.0;
+        y = @(initial_step) 4.0;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    CHECK(c == std::vector<DiagCode>(4, diag::NotAllowedInAnalog));
+}
+
+TEST_CASE("VAMS scale-factor reals carried by macros mark the definition (C5-L2)") {
+    // The reviewer's input, as one preprocessor stream (--single-unit): a VAMS region defines
+    // the macros, an SV module and a $unit class use them.
+    auto tree = SyntaxTree::fromText(R"(
+`begin_keywords "VAMS-2023"
+`define D 5u
+`define K 2k
+`end_keywords
+module sv;
+    real r;
+    real k = `K;
+    initial #`D r = 1;
+endmodule
+class C;
+    task t(); #`D; endtask
+endclass
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    CHECK(compilation.getRoot().lookupName<InstanceSymbol>("sv").getDefinition().isVams);
+    auto c = codes(compilation);
+    CHECK(std::ranges::count(c, diag::ScaledDelay) == 2);
 }

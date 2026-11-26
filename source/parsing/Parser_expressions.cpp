@@ -286,9 +286,16 @@ ExpressionSyntax& Parser::parsePrimaryExpression(bitmask<ExpressionOptions> opti
         case TokenKind::TimeLiteral:
             return factory.literalExpression(SyntaxKind::TimeLiteralExpression,
                                              numberParser.parseReal(*this));
-        case TokenKind::RealLiteral:
+        case TokenKind::RealLiteral: {
+            // SVMake VAMS P0.1: a scale-factor real (`5u`, `2k`) is lexed only in VAMS source, so
+            // it is VAMS syntax for the definition's VAMS bit even when a macro carries it into
+            // SystemVerilog text (VAMS-2023 2.6.2).
+            auto raw = peek().rawText();
+            if (!raw.empty() && std::string_view("TGMKkmunpfa").find(raw.back()) != std::string_view::npos)
+                sawVamsSyntax = true;
             return factory.literalExpression(SyntaxKind::RealLiteralExpression,
                                              numberParser.parseReal(*this));
+        }
         case TokenKind::IntegerLiteral:
         case TokenKind::IntegerBase:
             return parseIntegerExpression(options.has(ExpressionOptions::DisallowVectors));
