@@ -114,7 +114,7 @@ public:
 
     /// Checks whether the given macro is defined. This does not check built-in
     /// directives except for the intrinsic macros (__LINE__, etc).
-    bool isDefined(std::string_view name);
+    bool isDefined(std::string_view name) const;
 
     /// Sets the base keyword version for the current compilation unit. Note that this does not
     /// affect the keyword version if the user has explicitly requested a different
@@ -167,6 +167,12 @@ public:
 
     /// Gets the currently active keyword version in use by the preprocessor.
     KeywordVersion getCurrentKeywordVersion() const { return keywordVersionStack.back().version; }
+
+    /// SVMake VAMS P0.1: true while the preprocessor is reading Verilog-AMS source text: a buffer
+    /// mapped to a VAMS keyword version, text after `begin_keywords "VAMS-*"`, or an unmapped file
+    /// included from such text. A nested non-VAMS `begin_keywords changes only the reserved words
+    /// (VAMS-2023 10.6), so the text stays VAMS source. `__VAMS_ENABLE__` is defined exactly then.
+    bool isVamsSource() const { return currentVamsSource; }
 
     /// Gets the currently active source library, or nullptr if none has been set.
     const SourceLibrary* getCurrentLibrary() const;
@@ -546,9 +552,25 @@ private:
         //             last directive (or the default)
         enum class Source : uint8_t { Directive, Mapping, Restored } source;
 
-        KeywordVersionState(KeywordVersion keywordVersion, Source source = Source::Directive) :
-            version(keywordVersion), source(source) {};
+        // SVMake VAMS P0.1: for Mapping and Restored entries, whether the buffer is Verilog-AMS
+        // source (VAMS-2023 10.5/10.6); Directive entries derive it (see computeVamsSource).
+        bool vamsSource = false;
+
+        // SVMake VAMS P0.1: for Mapping and Restored entries, the lexer stack depth of the buffer
+        // that pushed the entry, so popping that buffer removes exactly its own entry.
+        size_t ownerDepth = 0;
+
+        KeywordVersionState(KeywordVersion keywordVersion, Source source = Source::Directive,
+                            bool vamsSource = false, size_t ownerDepth = 0) :
+            version(keywordVersion), source(source), vamsSource(vamsSource),
+            ownerDepth(ownerDepth) {};
     };
+
+    // SVMake VAMS P0.1: Verilog-AMS source state.
+    bool computeVamsSource(size_t index, bool skipMappings) const;
+    void updateVamsSource();
+    bool currentVamsSource = false;
+    MacroDef vamsEnableMacro;
 
     /// Various state set by preprocessor directives.
     std::vector<KeywordVersionState> keywordVersionStack;

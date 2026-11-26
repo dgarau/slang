@@ -3150,6 +3150,12 @@ UdpFieldBaseSyntax* Parser::parseUdpField(bool required, bool isInput, bool isSe
                 }
                 return tok;
             }
+            case TokenKind::RealLiteral:
+                // SVMake VAMS P0.1: in Verilog-AMS source `0f`, `1p`, `0n` lex as scale-factor
+                // reals (VAMS-2023 2.6.2); a UDP table reads their raw text as symbols.
+                if (!getPP().isVamsSource())
+                    goto notSymbol;
+                [[fallthrough]];
             case TokenKind::Identifier:
             case TokenKind::IntegerLiteral: {
                 auto tok = consume();
@@ -3178,6 +3184,7 @@ UdpFieldBaseSyntax* Parser::parseUdpField(bool required, bool isInput, bool isSe
                 return tok;
             }
             default:
+            notSymbol:
                 if (required) {
                     error = true;
                     addDiag(diag::ExpectedUdpSymbol, peek().location());
@@ -3350,7 +3357,8 @@ UdpBodySyntax& Parser::parseUdpBody(bool isSequential) {
     auto table = expect(TokenKind::TableKeyword);
 
     SmallVector<UdpEntrySyntax*> entries;
-    while (isPossibleUdpEntry(peek().kind)) {
+    while (isPossibleUdpEntry(peek().kind) ||
+           (peek().kind == TokenKind::RealLiteral && getPP().isVamsSource())) {
         auto current = peek();
         entries.push_back(&parseUdpEntry(isSequential));
 

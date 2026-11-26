@@ -9,6 +9,7 @@
 
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/driver/Driver.h"
 #include "slang/driver/SourceLoader.h"
 #include "slang/text/SourceManager.h"
@@ -959,4 +960,32 @@ TEST_CASE("Driver dependencies distinguish explicit interface ports from data ty
     INFO(OS::capturedStderr);
     CHECK(driver.diagEngine.getNumWarnings() == 0);
     CHECK(OS::capturedStdout == "leaf.sv\nbus.sv\ntop.sv\n");
+}
+
+TEST_CASE("Driver --map-keyword-version selects Verilog-AMS (SVMake VAMS P0.1)") {
+    auto run = [](std::string_view pattern, double expectedX) {
+        auto guard = OS::captureOutput();
+        Driver driver;
+        driver.addStandardArgs();
+
+        auto dir = findTestDir() + "vams/";
+        auto args = fmt::format(
+            "testfoo \"{0}c1top.vams\" \"{0}c1plain.sv\" \"-I{0}\" --map-keyword-version \"{1}\"",
+            dir, pattern);
+        CHECK(driver.parseCommandLine(args));
+        CHECK(driver.processOptions());
+        CHECK(driver.parseAllSources());
+        CHECK(driver.reportParseDiags());
+
+        auto compilation = driver.createCompilation();
+        CHECK(compilation->getAllDiagnostics().empty());
+        auto& top = compilation->getRoot().lookupName<ParameterSymbol>("c1top.x");
+        CHECK(top.getValue().convertToReal().real() == expectedX);
+        auto& plain = compilation->getRoot().lookupName<ParameterSymbol>("c1plain.y");
+        CHECK(plain.getValue().integer() == 1);
+    };
+
+    // Globs match the absolute buffer path, so the mapping needs a recursive pattern.
+    run("VAMS-2023+.../*.vams", 1000.0);
+    run("VAMS-2023+*.vams", 0.0);
 }

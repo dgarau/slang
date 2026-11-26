@@ -1045,7 +1045,7 @@ def loadkinds(ourdir, filename):
         inf = f.readlines()
     for line in [x.strip("\n") for x in inf]:
         line = line.strip()
-        if not line:
+        if not line or line.startswith("#"):
             continue
 
         kinds.append(line)

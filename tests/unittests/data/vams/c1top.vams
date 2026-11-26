@@ -1,0 +1,5 @@
+// SVMake VAMS P0.1 Driver test: mapped to VAMS-2023 by --map-keyword-version.
+`include "c1body.vh"
+module c1top;
+  localparam x = `C1_BODY;
+endmodule

@@ -33,6 +33,7 @@ Preprocessor::Preprocessor(SourceManager& sourceManager, BumpAllocator& alloc,
     numberParser(diagnostics, alloc, options.languageVersion) {
 
     keywordVersionStack.push_back(LF::getDefaultKeywordVersion(options.languageVersion));
+    updateVamsSource();
     resetAllDirectives();
     undefineAll();
 
@@ -87,6 +88,7 @@ Preprocessor::Preprocessor(const Preprocessor& other) :
     numberParser(diagnostics, alloc, options.languageVersion) {
 
     keywordVersionStack.push_back(LF::getDefaultKeywordVersion(options.languageVersion));
+    updateVamsSource();
 }
 
 void Preprocessor::setFilePathMode(bool enable) {
@@ -116,8 +118,20 @@ void Preprocessor::pushSource(SourceBuffer buffer) {
             }
         }
 
+        // SVMake VAMS P0.1: entries record the depth of the buffer that pushed them
+        // (popSource removes exactly that entry) and whether the buffer is VAMS source.
+        const size_t ownerDepth = lexerStack.size() + 1;
         if (bufVersion.has_value()) {
-            keywordVersionStack.push_back({*bufVersion, KeywordVersionState::Source::Mapping});
+            keywordVersionStack.push_back({*bufVersion, KeywordVersionState::Source::Mapping,
+                                           LF::isVamsKeywordVersion(*bufVersion), ownerDepth});
+        }
+        else if (includeDepth > 0 && currentVamsSource) {
+            // SVMake VAMS P0.1: an unmapped file included from Verilog-AMS source is VAMS
+            // source too (VAMS-2023 10.5: __VAMS_ENABLE__ is defined while parsing VAMS source
+            // text; 10.6: the keyword state crosses file boundaries), so it inherits the state.
+            keywordVersionStack.push_back({keywordVersionStack.back().version,
+                                           KeywordVersionState::Source::Restored, true,
+                                           ownerDepth});
         }
         else if (!keywordVersionStack.empty() &&
                  keywordVersionStack.back().source == KeywordVersionState::Source::Mapping) {
@@ -125,12 +139,15 @@ void Preprocessor::pushSource(SourceBuffer buffer) {
             // a forced mapping and use that (i.e. restore it).
             for (auto it = keywordVersionStack.rbegin(); it != keywordVersionStack.rend(); ++it) {
                 if (it->source != KeywordVersionState::Source::Mapping) {
-                    keywordVersionStack.push_back(
-                        {it->version, KeywordVersionState::Source::Restored});
+                    size_t index = size_t(keywordVersionStack.rend() - it) - 1;
+                    keywordVersionStack.push_back({it->version,
+                                                   KeywordVersionState::Source::Restored,
+                                                   computeVamsSource(index, true), ownerDepth});
                     break;
                 }
             }
         }
+        updateVamsSource();
     }
 
     if (options.bufferChangeCB && includeDepth > 0)
@@ -162,10 +179,17 @@ bool Preprocessor::popSource() {
     if (includeDepth)
         includeDepth--;
 
-    if (!keywordVersionStack.empty() &&
-        keywordVersionStack.back().source != KeywordVersionState::Source::Directive) {
-        keywordVersionStack.pop_back();
+    // SVMake VAMS P0.1: remove the Mapping or Restored entry this buffer pushed, wherever it sits:
+    // an unbalanced `begin_keywords inside the buffer leaves a Directive entry above it, and the
+    // old pop-the-top rule then leaked the stale entry into the includer.
+    for (auto it = keywordVersionStack.rbegin(); it != keywordVersionStack.rend(); ++it) {
+        if (it->source != KeywordVersionState::Source::Directive &&
+            it->ownerDepth == lexerStack.size()) {
+            keywordVersionStack.erase(it.base() - 1);
+            break;
+        }
     }
+    updateVamsSource();
 
     // Check if this file was guarded by a valid header guard. If it was, remember
     // it as an include-once header. If not, and it looks like the user messed up
@@ -284,12 +308,48 @@ void Preprocessor::undefineAll() {
         undefine(undef);
 }
 
-bool Preprocessor::isDefined(std::string_view name) {
-    return !name.empty() && macros.find(name) != macros.end();
+bool Preprocessor::isDefined(std::string_view name) const {
+    if (name.empty())
+        return false;
+    if (macros.find(name) != macros.end())
+        return true;
+
+    // SVMake VAMS P0.1: __VAMS_ENABLE__ is defined exactly while reading VAMS source text
+    // (VAMS-2023 10.5). A user definition of the name is an ordinary macro and wins.
+    return currentVamsSource && name == "__VAMS_ENABLE__"sv;
 }
 
 void Preprocessor::setKeywordVersion(KeywordVersion version) {
     keywordVersionStack[0] = version;
+    updateVamsSource();
+}
+
+bool Preprocessor::computeVamsSource(size_t index, bool skipMappings) const {
+    // SVMake VAMS P0.1: walk down from `index`. A Mapping or Restored entry decides for its buffer;
+    // a `begin_keywords "VAMS-*" makes the text VAMS source; a non-VAMS `begin_keywords keeps
+    // whatever the text was (VAMS-2023 10.6 changes only the reserved words); the base entry
+    // is the default (SystemVerilog) version.
+    for (size_t i = index + 1; i-- > 0;) {
+        auto& entry = keywordVersionStack[i];
+        switch (entry.source) {
+            case KeywordVersionState::Source::Mapping:
+                if (skipMappings)
+                    continue;
+                return entry.vamsSource;
+            case KeywordVersionState::Source::Restored:
+                return entry.vamsSource;
+            case KeywordVersionState::Source::Directive:
+                if (LF::isVamsKeywordVersion(entry.version))
+                    return true;
+                break;
+        }
+    }
+    return false;
+}
+
+void Preprocessor::updateVamsSource() {
+    currentVamsSource = !keywordVersionStack.empty() &&
+                        computeVamsSource(keywordVersionStack.size() - 1, false);
 }
 
 void Preprocessor::resetAllDirectives() {
@@ -563,7 +623,7 @@ Token Preprocessor::nextRaw() {
         }
 
         SLANG_ASSERT(!lexerStack.empty());
-        return lexerStack.back()->lex(keywordVersionStack.back().version);
+        return lexerStack.back()->lex(keywordVersionStack.back().version, currentVamsSource);
     };
 
     auto token = getNext();
@@ -1214,8 +1274,10 @@ Trivia Preprocessor::handleBeginKeywordsDirective(Token directive) {
         auto versionOpt = LF::getKeywordVersion(versionToken.valueText());
         if (!versionOpt)
             addDiag(diag::UnrecognizedKeywordVersion, versionToken.range());
-        else
+        else {
             keywordVersionStack.push_back(*versionOpt);
+            updateVamsSource();
+        }
     }
 
     auto result = alloc.emplace<BeginKeywordsDirectiveSyntax>(directive, versionToken);
@@ -1238,6 +1300,7 @@ Trivia Preprocessor::handleEndKeywordsDirective(Token directive) {
             }
             else {
                 keywordVersionStack.erase(it.base() - 1);
+                updateVamsSource();
             }
             break;
         }
@@ -1495,9 +1558,7 @@ bool Preprocessor::evalConditionalExpr(
             }
         }
         case SyntaxKind::NamedConditionalDirectiveExpression:
-            return macros.find(
-                       expr.as<NamedConditionalDirectiveExpressionSyntax>().name.valueText()) !=
-                   macros.end();
+            return isDefined(expr.as<NamedConditionalDirectiveExpressionSyntax>().name.valueText());
         default:
             SLANG_UNREACHABLE;
     }

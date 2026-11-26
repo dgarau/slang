@@ -107,6 +107,12 @@ public:
     Token lex();
     Token lex(KeywordVersion keywordVersion);
 
+    /// SVMake VAMS P0.1: lexes with an explicit "Verilog-AMS source" flag, which is separate from the
+    /// keyword table (VAMS-2023 10.6: `begin_keywords "1364-2005" inside VAMS source changes only the
+    /// reserved words). VAMS source forms the `<+` token and scale-factor reals (2.6.2).
+    /// The single-argument overload derives the flag from the keyword version.
+    Token lex(KeywordVersion keywordVersion, bool vamsSource);
+
     /// Looks ahead in the source stream to see if the next token we would lex
     /// is on the same line as the previous token we've lexed.
     bool isNextTokenOnSameLine();
@@ -137,6 +143,13 @@ public:
                                   const LexerOptions& options, Token left, Token right,
                                   SmallVectorBase<Token>& results);
 
+    /// SVMake VAMS P0.1: as above, re-lexing the combined text with the given keyword version
+    /// and Verilog-AMS source flag (the caller's current state) instead of the default version.
+    static bool concatenateTokens(BumpAllocator& alloc, SourceManager& sourceManager,
+                                  const LexerOptions& options, Token left, Token right,
+                                  KeywordVersion keywordVersion, bool vamsSource,
+                                  SmallVectorBase<Token>& results);
+
     /// Converts a range of tokens into a string literal; used for macro stringification.
     static Token stringify(BumpAllocator& alloc, SourceManager& sourceManager,
                            const LexerOptions& options, Token startToken,
@@ -153,6 +166,12 @@ public:
                             Token sourceToken, size_t offset, KeywordVersion keywordVersion,
                             SmallVectorBase<Token>& results);
 
+    /// SVMake VAMS P0.1: as above with an explicit Verilog-AMS source flag.
+    static void splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
+                            SourceManager& sourceManager, const LexerOptions& options,
+                            Token sourceToken, size_t offset, KeywordVersion keywordVersion,
+                            bool vamsSource, SmallVectorBase<Token>& results);
+
     /// Given a char index into a processed string literal and the raw string representing
     /// that literal, returns the offset within the raw string that matches that character.
     /// This essentially backs out the processing of things like escape character codes.
@@ -168,7 +187,7 @@ private:
 
     Token lexToken(KeywordVersion keywordVersion);
     Token lexEscapeSequence(bool isMacroName);
-    Token lexNumericLiteral();
+    Token lexNumericLiteral(bool vamsSource);
     Token lexDollarSign();
     Token lexDirective();
     Token lexApostrophe();
@@ -243,6 +262,9 @@ private:
     // In file path mode: the last token lexed may be continued by the next one as part of
     // the same unquoted path, so a '/' right after it (with no trivia) is a path character.
     bool filePathOpen = false;
+
+    // SVMake VAMS P0.1: Verilog-AMS source flag for the token being lexed.
+    bool lexVamsSource = false;
 
     // temporary storage for building arrays of trivia
     SmallVector<Trivia, 32> triviaBuffer;

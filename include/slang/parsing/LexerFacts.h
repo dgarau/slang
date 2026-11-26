@@ -33,7 +33,10 @@ enum class SLANG_EXPORT KeywordVersion : uint8_t {
     v1800_2009 = 5,
     v1800_2012 = 6,
     v1800_2017 = 7,
-    v1800_2023 = 8
+    v1800_2023 = 8,
+    // SVMake VAMS P0.1: Accellera Verilog-AMS keyword sets (appended; values index allKeywords[]).
+    vams_2023 = 9,
+    vams_2_3 = 10
 };
 
 class SLANG_EXPORT LexerFacts {
@@ -44,6 +47,9 @@ public:
     static std::optional<KeywordVersion> getKeywordVersion(std::string_view text);
     static const flat_hash_map<std::string_view, TokenKind>* getKeywordTable(
         KeywordVersion version);
+
+    /// SVMake VAMS P0.1: true for the Verilog-AMS keyword versions ("VAMS-2023", "VAMS-2.3").
+    static bool isVamsKeywordVersion(KeywordVersion version);
 
     static syntax::SyntaxKind getDirectiveKind(std::string_view directive,
                                                bool enableLegacyProtect);

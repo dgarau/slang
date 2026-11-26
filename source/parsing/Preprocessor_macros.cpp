@@ -25,8 +25,19 @@ Preprocessor::MacroDef Preprocessor::findMacro(Token directive) {
         name = name.substr(1);
 
     auto it = macros.find(name);
-    if (it == macros.end())
+    if (it == macros.end()) {
+        // SVMake VAMS P0.1: the dynamic __VAMS_ENABLE__ builtin (see isDefined).
+        if (currentVamsSource && name == "__VAMS_ENABLE__"sv) {
+            if (!vamsEnableMacro.valid()) {
+                createBuiltInMacro("__VAMS_ENABLE__"sv, 1);
+                auto vit = macros.find("__VAMS_ENABLE__"sv);
+                vamsEnableMacro = vit->second;
+                macros.erase(vit);
+            }
+            return vamsEnableMacro;
+        }
         return nullptr;
+    }
     return it->second;
 }
 
@@ -321,7 +332,8 @@ private:
     bool doConcat(SmallVectorBase<Token>& targetBuf, Token right) {
         SmallVector<Token> results;
         if (!Lexer::concatenateTokens(pp.alloc, pp.sourceManager, pp.lexerOptions, targetBuf.back(),
-                                      right, results)) {
+                                      right, pp.getCurrentKeywordVersion(), pp.isVamsSource(),
+                                      results)) {
             return false;
         }
 
@@ -638,6 +650,7 @@ bool Preprocessor::expandMacro(MacroDef macro, MacroExpansion& expansion,
             SmallVector<Token> concatResult;
             Token grave(alloc, TokenKind::Unknown, first.trivia(), "`"sv, firstLoc);
             if (Lexer::concatenateTokens(alloc, sourceManager, lexerOptions, grave, first,
+                                         getCurrentKeywordVersion(), isVamsSource(),
                                          concatResult) &&
                 concatResult.size() == 1) {
                 first = concatResult[0];
@@ -1025,7 +1038,7 @@ Token Preprocessor::MacroParser::expect(TokenKind kind) {
 
 void Preprocessor::splitTokens(Token sourceToken, size_t offset, SmallVectorBase<Token>& results) {
     Lexer::splitTokens(alloc, diagnostics, sourceManager, lexerOptions, sourceToken, offset,
-                       getCurrentKeywordVersion(), results);
+                       getCurrentKeywordVersion(), isVamsSource(), results);
 }
 
 static bool isSameToken(Token left, Token right) {

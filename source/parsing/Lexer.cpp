@@ -65,6 +65,15 @@ Lexer::Lexer(BufferID bufferId, std::string_view source, BumpAllocator& alloc,
 bool Lexer::concatenateTokens(BumpAllocator& alloc, SourceManager& sourceManager,
                               const LexerOptions& options, Token left, Token right,
                               SmallVectorBase<Token>& results) {
+    auto version = LF::getDefaultKeywordVersion(options.languageVersion);
+    return concatenateTokens(alloc, sourceManager, options, left, right, version,
+                             LF::isVamsKeywordVersion(version), results);
+}
+
+bool Lexer::concatenateTokens(BumpAllocator& alloc, SourceManager& sourceManager,
+                              const LexerOptions& options, Token left, Token right,
+                              KeywordVersion keywordVersion, bool vamsSource,
+                              SmallVectorBase<Token>& results) {
     auto location = left.location();
     auto trivia = left.trivia();
 
@@ -86,7 +95,7 @@ bool Lexer::concatenateTokens(BumpAllocator& alloc, SourceManager& sourceManager
     Diagnostics diags;
     Lexer lexer{BufferID::getPlaceholder(), combined, alloc, diags, sourceManager, options};
 
-    auto token = lexer.lex();
+    auto token = lexer.lex(keywordVersion, vamsSource);
     if (token.kind == TokenKind::Unknown || token.rawText().empty() ||
         std::ranges::any_of(diags, [](Diagnostic& d) { return d.isError(); })) {
         return false;
@@ -211,6 +220,14 @@ void Lexer::splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
                         SourceManager& sourceManager, const LexerOptions& options,
                         Token sourceToken, size_t offset, KeywordVersion keywordVersion,
                         SmallVectorBase<Token>& results) {
+    splitTokens(alloc, diagnostics, sourceManager, options, sourceToken, offset, keywordVersion,
+                LF::isVamsKeywordVersion(keywordVersion), results);
+}
+
+void Lexer::splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
+                        SourceManager& sourceManager, const LexerOptions& options,
+                        Token sourceToken, size_t offset, KeywordVersion keywordVersion,
+                        bool vamsSource, SmallVectorBase<Token>& results) {
     auto raw = sourceToken.rawText().substr(offset);
     if (raw.empty())
         return;
@@ -225,7 +242,7 @@ void Lexer::splitTokens(BumpAllocator& alloc, Diagnostics& diagnostics,
 
     auto loc = sourceToken.location();
     while (true) {
-        auto token = lexer.lex(keywordVersion);
+        auto token = lexer.lex(keywordVersion, vamsSource);
         if (token.kind == TokenKind::EndOfFile)
             break;
 
@@ -239,6 +256,11 @@ Token Lexer::lex() {
 }
 
 Token Lexer::lex(KeywordVersion keywordVersion) {
+    return lex(keywordVersion, LF::isVamsKeywordVersion(keywordVersion));
+}
+
+Token Lexer::lex(KeywordVersion keywordVersion, bool vamsSource) {
+    lexVamsSource = vamsSource;
     triviaBuffer.clear();
     lexTrivia<false>();
 
@@ -500,7 +522,7 @@ Token Lexer::lexToken(KeywordVersion keywordVersion) {
         case '9':
             // back up so that lexNumericLiteral can look at this digit again
             sourceBuffer--;
-            return lexNumericLiteral();
+            return lexNumericLiteral(lexVamsSource);
         case ':':
             switch (peek()) {
                 case '=':
@@ -526,6 +548,14 @@ Token Lexer::lexToken(KeywordVersion keywordVersion) {
                 case '=':
                     advance();
                     return create(TokenKind::LessThanEquals);
+                case '+':
+                    // SVMake VAMS P0.1: the contribution operator exists only in Verilog-AMS
+                    // source; in SystemVerilog `a<+b` stays `a < (+b)`.
+                    if (lexVamsSource) {
+                        advance();
+                        return create(TokenKind::LessThanPlus);
+                    }
+                    return create(TokenKind::LessThan);
                 case '-':
                     if (peek(1) == '>') {
                         advance(2);
@@ -1011,7 +1041,7 @@ Token Lexer::lexDirective() {
     return create(TokenKind::Directive, directive);
 }
 
-Token Lexer::lexNumericLiteral() {
+Token Lexer::lexNumericLiteral(bool vamsSource) {
     // have to check for the "1step" magic keyword
     static const char OneStepText[] = "1step";
     for (int i = 0; i < (int)sizeof(OneStepText) - 1; i++) {
@@ -1137,6 +1167,38 @@ Token Lexer::lexNumericLiteral() {
         timeSuffix = lexTimeLiteral();
         if (timeSuffix && floatChars.empty())
             populateChars();
+
+        // SVMake VAMS P0.1: Verilog-AMS scale factors (VAMS-2023 2.6.2, Table 2-1), only in VAMS
+        // source and only after the time suffix check, so `1ns` and `timescale 1ns/1ps keep lexing
+        // as time literals. The letter must not be followed by an identifier character (`1kx` and
+        // `'h3ab` are unchanged). The exponent is appended as text so strtod rounds the decimal value.
+        if (!timeSuffix && vamsSource) {
+            const char* exponent = nullptr;
+            switch (peek()) {
+                case 'T': exponent = "12"; break;
+                case 'G': exponent = "9"; break;
+                case 'M': exponent = "6"; break;
+                case 'K':
+                case 'k': exponent = "3"; break;
+                case 'm': exponent = "-3"; break;
+                case 'u': exponent = "-6"; break;
+                case 'n': exponent = "-9"; break;
+                case 'p': exponent = "-12"; break;
+                case 'f': exponent = "-15"; break;
+                case 'a': exponent = "-18"; break;
+                default: break;
+            }
+
+            char next = peek(1);
+            if (exponent && !isAlphaNumeric(next) && next != '_' && next != '$') {
+                advance();
+                if (floatChars.empty())
+                    populateChars();
+                floatChars.push_back('e');
+                for (const char* e = exponent; *e; e++)
+                    floatChars.push_back(*e);
+            }
+        }
     }
 
     if (!floatChars.empty()) {
