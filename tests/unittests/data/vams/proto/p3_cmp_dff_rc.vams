@@ -1,0 +1,33 @@
+// VAMS P0.5 fixture 3: comparator + toggle flip-flop driving an RC (mixed loop: A2D cross, D2A transition).
+// in = sin(2*pi*f*t), f = 100 kHz. A2D: always @(cross(V(in) - 0.5, +1, 1e-12)) toggles q (0 -> 1 -> 0 ...).
+// D2A: V(drv) <+ transition(q, 0, 100n, 100n), then R = 1k into C = 1n (tau = 1 us).
+// Golden (golden.py, cmp_dff_rc):
+//   true crossings t_k = (1/12 + k)/f = 0.8333.., 10.8333.., 20.8333.., 30.8333.. us (asin(0.5) = pi/6);
+//   the cross event lies in [t_k, t_k + time_tol] (§5.10.3.1, time_tol = 1 ps); the digital time reported is
+//   that time rounded to the 1 ps precision (§8.4.3.3: error <= half the precision), so each "q=" line's time
+//   is checked against that window; the zero-delay D2A starts at the true analog event time (§8.4.3.3);
+//   V(out) is the RC response to the resulting piecewise-linear drive, a sum of ramp responses
+//   g(x) = x - tau*(1 - exp(-x/tau)).
+// Expected q lines (times in ns, 3 decimals): q=1 t=833.333, q=0 t=10833.333, q=1 t=20833.333, q=0 t=30833.333
+// Stop: 40 us.
+`timescale 1ns/1ps
+`include "disciplines.vams"
+`include "constants.vams"
+
+module top;
+  electrical in, drv, out, gnd;
+  ground gnd;
+  reg q = 1'b0;
+
+  analog begin
+    V(in, gnd) <+ sin(2.0 * `M_PI * 1.0e5 * $abstime);
+    V(drv, gnd) <+ transition(q ? 1.0 : 0.0, 0.0, 1.0e-7, 1.0e-7);
+    I(drv, out) <+ V(drv, out) / 1.0e3;
+    I(out, gnd) <+ 1.0e-9 * ddt(V(out, gnd));
+  end
+
+  always @(cross(V(in) - 0.5, +1, 1.0e-12)) q <= ~q;
+  always @(q) $display("q=%b t=%0.3f", q, $realtime);
+
+  initial #40000 $finish;
+endmodule

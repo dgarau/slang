@@ -1,0 +1,561 @@
+//------------------------------------------------------------------------------
+// AnalogSymbols.cpp
+// SVMake VAMS P0.1: Verilog-AMS (Accellera VAMS-2023) symbols
+//
+// SPDX-FileCopyrightText: Michael Popoloski
+// SPDX-License-Identifier: MIT
+//------------------------------------------------------------------------------
+#include "slang/ast/symbols/AnalogSymbols.h"
+
+#include "slang/ast/ASTContext.h"
+#include "slang/ast/ASTSerializer.h"
+#include "slang/ast/Compilation.h"
+#include "slang/ast/Expression.h"
+#include "slang/ast/expressions/MiscExpressions.h"
+#include "slang/ast/expressions/SelectExpressions.h"
+#include "slang/ast/symbols/CompilationUnitSymbols.h"
+#include "slang/ast/symbols/InstanceSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
+#include "slang/ast/types/Type.h"
+#include "slang/diagnostics/LookupDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
+#include "slang/syntax/AllSyntax.h"
+
+namespace slang::ast {
+
+using namespace syntax;
+using namespace parsing;
+
+bool isVamsScope(const Scope& scope) {
+    const Scope* current = &scope;
+    while (current) {
+        auto& sym = current->asSymbol();
+        switch (sym.kind) {
+            case SymbolKind::InstanceBody:
+                return sym.as<InstanceBodySymbol>().getDefinition().isVams;
+            case SymbolKind::CompilationUnit:
+            case SymbolKind::Root:
+            case SymbolKind::Package:
+                return false;
+            default:
+                break;
+        }
+        current = sym.getParentScope();
+    }
+    return false;
+}
+
+// ----- NatureSymbol -----
+
+static std::string_view nameValue(const ExpressionSyntax& expr) {
+    if (expr.kind == SyntaxKind::IdentifierName)
+        return expr.as<IdentifierNameSyntax>().identifier.valueText();
+    return {};
+}
+
+void NatureSymbol::resolve() const {
+    if (resolved || resolving)
+        return;
+    resolving = true;
+
+    auto scope = getParentScope();
+    auto syntax = getSyntax();
+    SLANG_ASSERT(scope && syntax);
+    auto& comp = scope->getCompilation();
+    auto& decl = syntax->as<NatureDeclarationSyntax>();
+    ASTContext context(*scope, LookupLocation::max);
+
+    // parent_nature ::= nature_identifier | discipline_identifier . potential_or_flow
+    if (auto pc = decl.parent) {
+        auto parentName = pc->name.valueText();
+        if (pc->dot) {
+            auto disc = comp.getDiscipline(parentName);
+            if (!disc) {
+                if (!parentName.empty())
+                    scope->addDiag(diag::UnknownDiscipline, pc->name.range()) << parentName;
+            }
+            else {
+                parent = pc->potentialOrFlow.kind == TokenKind::FlowKeyword ? disc->getFlow()
+                                                                            : disc->getPotential();
+            }
+        }
+        else if (!parentName.empty()) {
+            parent = comp.getNature(parentName);
+            if (!parent)
+                scope->addDiag(diag::UnknownNature, pc->name.range()) << parentName;
+        }
+
+        if (parent == this)
+            parent = nullptr;
+        if (parent) {
+            parent->resolve();
+            if (parent->resolving) // a cycle in the parent chain
+                parent = nullptr;
+        }
+    }
+
+    bool hasAccess = false, hasUnits = false, hasAbstol = false;
+    SmallVector<UserAttribute> users;
+    for (auto item : decl.items) {
+        auto attrName = item->name.valueText();
+        auto& value = *item->value;
+        switch (item->name.kind) {
+            case TokenKind::AccessKeyword: {
+                // 3.6.1.2: an identifier, by name; a derived nature cannot change it.
+                auto name = nameValue(value);
+                if (name.empty()) {
+                    scope->addDiag(diag::NatureAttributeNotName, value.sourceRange()) << attrName;
+                }
+                else if (parent) {
+                    scope->addDiag(diag::NatureAttributeChanged, item->name.range()) << attrName;
+                }
+                else {
+                    accessName = name;
+                }
+                hasAccess = true;
+                break;
+            }
+            case TokenKind::UnitsKeyword: {
+                // 3.6.1.2: a string; a derived nature cannot define or change it.
+                if (parent) {
+                    scope->addDiag(diag::NatureAttributeChanged, item->name.range()) << attrName;
+                    break;
+                }
+                auto& expr = Expression::bind(value, context);
+                auto cv = context.eval(expr);
+                if (expr.bad()) {
+                }
+                else if (!expr.isImplicitString() && !cv.isString()) {
+                    scope->addDiag(diag::NatureUnitsNotString, value.sourceRange());
+                }
+                else if (cv) {
+                    auto str = cv.isString() ? cv.str() : cv.convertToStr().str();
+                    auto mem = (char*)comp.allocate(str.size(), 1);
+                    std::ranges::copy(str, mem);
+                    units = std::string_view(mem, str.size());
+                }
+                hasUnits = true;
+                break;
+            }
+            case TokenKind::AbstolKeyword: {
+                auto& expr = Expression::bind(value, context);
+                auto cv = context.eval(expr);
+                if (cv)
+                    abstol = cv.convertToReal().real();
+                hasAbstol = true;
+                break;
+            }
+            case TokenKind::DdtNatureKeyword:
+            case TokenKind::IdtNatureKeyword: {
+                auto name = nameValue(value);
+                if (name.empty()) {
+                    scope->addDiag(diag::NatureAttributeNotName, value.sourceRange()) << attrName;
+                    break;
+                }
+                if (!comp.getNature(name))
+                    scope->addDiag(diag::UnknownNature, value.sourceRange()) << name;
+                if (item->name.kind == TokenKind::DdtNatureKeyword)
+                    ddtName = name;
+                else
+                    idtName = name;
+                break;
+            }
+            default:
+                users.push_back({attrName, &value});
+                break;
+        }
+    }
+    userAttributes = users.copy(comp);
+
+    if (parent) {
+        // Inherited attributes (3.6.1.1, 3.6.1.2).
+        accessName = parent->getAccessName();
+        units = parent->getUnits();
+        if (!hasAbstol)
+            abstol = parent->getAbstol();
+        if (ddtName.empty() && parent->getDdtNature() != parent)
+            ddtName = parent->getDdtNature() ? parent->getDdtNature()->name : ""sv;
+        if (idtName.empty() && parent->getIdtNature() != parent)
+            idtName = parent->getIdtNature() ? parent->getIdtNature()->name : ""sv;
+    }
+    else if (!decl.parent) {
+        // 3.6.1.2: abstol, access and units are required for all base natures.
+        auto missing = [&](std::string_view attr) {
+            scope->addDiag(diag::NatureMissingAttribute, location) << name << attr;
+        };
+        if (!hasAbstol)
+            missing("abstol"sv);
+        if (!hasAccess)
+            missing("access"sv);
+        if (!hasUnits)
+            missing("units"sv);
+    }
+
+    resolving = false;
+    resolved = true;
+}
+
+const NatureSymbol* NatureSymbol::getParent() const {
+    resolve();
+    return parent;
+}
+
+const NatureSymbol& NatureSymbol::getBase() const {
+    auto current = this;
+    for (int depth = 0; depth < 64; depth++) {
+        auto p = current->getParent();
+        if (!p)
+            break;
+        current = p;
+    }
+    return *current;
+}
+
+std::string_view NatureSymbol::getAccessName() const {
+    resolve();
+    return accessName;
+}
+
+std::string_view NatureSymbol::getUnits() const {
+    resolve();
+    return units;
+}
+
+std::optional<double> NatureSymbol::getAbstol() const {
+    resolve();
+    return abstol;
+}
+
+const NatureSymbol* NatureSymbol::getDdtNature() const {
+    resolve();
+    if (ddtName.empty())
+        return this;
+    return getParentScope()->getCompilation().getNature(ddtName);
+}
+
+const NatureSymbol* NatureSymbol::getIdtNature() const {
+    resolve();
+    if (idtName.empty())
+        return this;
+    return getParentScope()->getCompilation().getNature(idtName);
+}
+
+std::span<const NatureSymbol::UserAttribute> NatureSymbol::getUserAttributes() const {
+    resolve();
+    return userAttributes;
+}
+
+void NatureSymbol::check() const {
+    resolve();
+}
+
+void NatureSymbol::serializeTo(ASTSerializer& serializer) const {
+    if (auto p = getParent())
+        serializer.writeLink("parent", *p);
+    serializer.write("access", getAccessName());
+    serializer.write("units", getUnits());
+    if (auto a = getAbstol())
+        serializer.write("abstol", *a);
+    if (auto d = getDdtNature(); d && d != this)
+        serializer.writeLink("ddtNature", *d);
+    if (auto i = getIdtNature(); i && i != this)
+        serializer.writeLink("idtNature", *i);
+}
+
+// ----- DisciplineSymbol -----
+
+void DisciplineSymbol::resolve() const {
+    if (resolved)
+        return;
+    resolved = true;
+
+    auto scope = getParentScope();
+    auto syntax = getSyntax();
+    SLANG_ASSERT(scope && syntax);
+    auto& comp = scope->getCompilation();
+    auto& decl = syntax->as<DisciplineDeclarationSyntax>();
+
+    bool sawPotential = false, sawFlow = false, sawDomain = false;
+    for (auto item : decl.items) {
+        switch (item->kind) {
+            case SyntaxKind::DisciplineNatureBinding: {
+                auto& nb = item->as<DisciplineNatureBindingSyntax>();
+                bool isFlow = nb.potentialOrFlow.kind == TokenKind::FlowKeyword;
+                bool& seen = isFlow ? sawFlow : sawPotential;
+                if (seen) {
+                    scope->addDiag(diag::DisciplineDuplicateBinding, nb.potentialOrFlow.range())
+                        << name << (isFlow ? "flow nature"sv : "potential nature"sv);
+                    break;
+                }
+                seen = true;
+
+                auto natureName = nb.nature.valueText();
+                auto nature = comp.getNature(natureName);
+                if (!nature) {
+                    if (!natureName.empty())
+                        scope->addDiag(diag::UnknownNature, nb.nature.range()) << natureName;
+                }
+                else if (isFlow) {
+                    flow = nature;
+                }
+                else {
+                    potential = nature;
+                }
+                break;
+            }
+            case SyntaxKind::DisciplineDomainBinding: {
+                auto& db = item->as<DisciplineDomainBindingSyntax>();
+                if (sawDomain) {
+                    scope->addDiag(diag::DisciplineDuplicateBinding, db.domain.range())
+                        << name << "domain"sv;
+                    break;
+                }
+                sawDomain = true;
+                domain = db.value.kind == TokenKind::DiscreteKeyword ? Domain::Discrete
+                                                                     : Domain::Continuous;
+                break;
+            }
+            default:
+                // Attribute overrides (3.6.2.5) are stored in the syntax; their semantics
+                // are P1.
+                break;
+        }
+    }
+
+    if (potential && flow && !potential->getAccessName().empty() &&
+        potential->getAccessName() == flow->getAccessName()) {
+        scope->addDiag(diag::DisciplineAccessConflict, location)
+            << name << potential->getAccessName();
+    }
+}
+
+const NatureSymbol* DisciplineSymbol::getPotential() const {
+    resolve();
+    return potential;
+}
+
+const NatureSymbol* DisciplineSymbol::getFlow() const {
+    resolve();
+    return flow;
+}
+
+DisciplineSymbol::Domain DisciplineSymbol::getDomain() const {
+    resolve();
+    return domain;
+}
+
+DisciplineSymbol::Domain DisciplineSymbol::getEffectiveDomain() const {
+    resolve();
+    if (domain != Domain::Unspecified)
+        return domain;
+    // 3.6.2.2: the default domain is continuous for a discipline that binds natures.
+    return (potential || flow) ? Domain::Continuous : Domain::Unspecified;
+}
+
+bool DisciplineSymbol::isNatureless() const {
+    resolve();
+    return !potential && !flow;
+}
+
+bool DisciplineSymbol::isDomainless() const {
+    resolve();
+    return domain == Domain::Unspecified && isNatureless();
+}
+
+bool DisciplineSymbol::areCompatible(const NatureSymbol* a, const NatureSymbol* b) {
+    // Self rule, non-existent binding rule.
+    if (a == b || !a || !b)
+        return true;
+
+    // Base nature rule and derived nature rule: compatible when they share a base.
+    if (&a->getBase() == &b->getBase())
+        return true;
+
+    // Units value rule.
+    auto ua = a->getUnits(), ub = b->getUnits();
+    return !ua.empty() && ua == ub;
+}
+
+bool DisciplineSymbol::isCompatibleWith(const DisciplineSymbol& other) const {
+    // Self rule.
+    if (this == &other)
+        return true;
+
+    // Domainless discipline rule.
+    if (isDomainless() || other.isDomainless())
+        return true;
+
+    // Domain incompatibility rule.
+    if (getEffectiveDomain() != other.getEffectiveDomain())
+        return false;
+
+    // Natureless discipline rule (same domain established above).
+    if (isNatureless() || other.isNatureless())
+        return true;
+
+    // Potential and flow incompatibility rules.
+    return areCompatible(getPotential(), other.getPotential()) &&
+           areCompatible(getFlow(), other.getFlow());
+}
+
+void DisciplineSymbol::check() const {
+    resolve();
+}
+
+void DisciplineSymbol::serializeTo(ASTSerializer& serializer) const {
+    if (auto p = getPotential())
+        serializer.writeLink("potential", *p);
+    if (auto f = getFlow())
+        serializer.writeLink("flow", *f);
+    switch (getDomain()) {
+        case Domain::Discrete:
+            serializer.write("domain", "discrete"sv);
+            break;
+        case Domain::Continuous:
+            serializer.write("domain", "continuous"sv);
+            break;
+        case Domain::Unspecified:
+            break;
+    }
+}
+
+// ----- AnalogTerminal -----
+
+AnalogTerminal AnalogTerminal::bind(const ExpressionSyntax& syntax, const ASTContext& context) {
+    AnalogTerminal result;
+    auto& expr = Expression::bind(syntax, context);
+    result.expr = &expr;
+    if (expr.bad())
+        return result;
+
+    const Expression* base = &expr;
+    std::optional<int32_t> index;
+    if (expr.kind == ExpressionKind::ElementSelect) {
+        auto& es = expr.as<ElementSelectExpression>();
+        base = &es.value();
+        auto cv = context.tryEval(es.selector());
+        if (!cv.isInteger()) {
+            context.addDiag(diag::BranchTerminalNotNet, expr.sourceRange);
+            return result;
+        }
+        index = cv.integer().as<int32_t>();
+    }
+
+    if (base->kind == ExpressionKind::HierarchicalValue) {
+        context.addDiag(diag::VamsNotSupported, expr.sourceRange) << "hierarchical terminals"sv;
+        return result;
+    }
+
+    if (base->kind != ExpressionKind::NamedValue ||
+        base->as<NamedValueExpression>().symbol.kind != SymbolKind::Net) {
+        context.addDiag(diag::BranchTerminalNotNet, expr.sourceRange);
+        return result;
+    }
+
+    auto& net = base->as<NamedValueExpression>().symbol.as<NetSymbol>();
+    if (!net.discipline || !net.discipline->isContinuous()) {
+        context.addDiag(diag::BranchTerminalNoDiscipline, expr.sourceRange) << net.name;
+        return result;
+    }
+
+    if (!index && net.getType().getBitWidth() > 1) {
+        context.addDiag(diag::VamsNotSupported, expr.sourceRange) << "vector branches"sv;
+        return result;
+    }
+
+    result.net = &net;
+    result.index = index;
+    return result;
+}
+
+// ----- BranchSymbol -----
+
+void BranchSymbol::fromSyntax(const Scope& scope, const BranchDeclarationSyntax& syntax,
+                              SmallVectorBase<const BranchSymbol*>& results) {
+    auto& comp = scope.getCompilation();
+    for (auto decl : syntax.declarators) {
+        if (!decl->dimensions.empty()) {
+            scope.addDiag(diag::VamsNotSupported, decl->dimensions.sourceRange())
+                << "vector branches"sv;
+        }
+        auto branch = comp.emplace<BranchSymbol>(decl->name.valueText(), decl->name.location());
+        branch->setSyntax(syntax);
+        branch->setAttributes(scope, syntax.attributes);
+        results.push_back(branch);
+    }
+}
+
+void BranchSymbol::resolve() const {
+    if (resolved)
+        return;
+    resolved = true;
+
+    auto scope = getParentScope();
+    auto syntax = getSyntax();
+    SLANG_ASSERT(scope && syntax);
+    auto& decl = syntax->as<BranchDeclarationSyntax>();
+    if (decl.terminals.empty())
+        return;
+
+    // Only the first declarator reports the extra-terminal, same-terminal and compatibility
+    // errors, so `branch (a,b) x, y;` reports them once.
+    bool first = decl.declarators.empty() || decl.declarators[0]->name.location() == location;
+    ASTContext context(*scope, LookupLocation::after(*this), ASTFlags::NonProcedural);
+
+    positive = AnalogTerminal::bind(*decl.terminals[0], context);
+    if (decl.terminals.size() > 1)
+        negative = AnalogTerminal::bind(*decl.terminals[1], context);
+    if (decl.terminals.size() > 2 && first)
+        context.addDiag(diag::BranchTerminalNotNet, decl.terminals[2]->sourceRange());
+
+    if (!positive.net || (negative && !negative->net))
+        return;
+
+    if (negative && positive.sameAs(*negative)) {
+        if (first)
+            scope->addDiag(diag::BranchSameTerminal, decl.terminals[1]->sourceRange());
+        return;
+    }
+
+    auto pd = positive.net->discipline;
+    if (negative) {
+        auto nd = negative->net->discipline;
+        if (!pd->isCompatibleWith(*nd)) {
+            if (first) {
+                scope->addDiag(diag::BranchDisciplineMismatch, decl.terminals[1]->sourceRange())
+                    << pd->name << nd->name;
+            }
+            return;
+        }
+        // A natureless discipline takes the other terminal's natures.
+        if (pd->isNatureless())
+            pd = nd;
+    }
+    discipline = pd;
+}
+
+const AnalogTerminal& BranchSymbol::getPositive() const {
+    resolve();
+    return positive;
+}
+
+const AnalogTerminal* BranchSymbol::getNegative() const {
+    resolve();
+    return negative ? &*negative : nullptr;
+}
+
+const DisciplineSymbol* BranchSymbol::getDiscipline() const {
+    resolve();
+    return discipline;
+}
+
+void BranchSymbol::serializeTo(ASTSerializer& serializer) const {
+    if (auto& p = getPositive(); p.expr)
+        serializer.write("positive", *p.expr);
+    if (auto n = getNegative(); n && n->expr)
+        serializer.write("negative", *n->expr);
+    if (auto d = getDiscipline())
+        serializer.writeLink("discipline", *d);
+}
+
+} // namespace slang::ast

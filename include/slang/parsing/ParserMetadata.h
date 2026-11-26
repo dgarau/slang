@@ -25,6 +25,10 @@ struct SLANG_EXPORT ParserMetadata {
         TokenKind unconnectedDrive;
         bool cellDefine = false;
         std::optional<TimeScale> timeScale;
+
+        /// SVMake VAMS P0.1: the declaration began in Verilog-AMS source text (captured by the
+        /// parser after the module header; a tree rebuilt from syntax alone loses it).
+        bool vamsSource = false;
     };
 
     /// Specific metadata that was in effect when certain syntax nodes were parsed

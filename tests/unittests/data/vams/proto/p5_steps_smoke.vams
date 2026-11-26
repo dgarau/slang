@@ -1,0 +1,31 @@
+// VAMS P0.5 fixture 5: @(initial_step) / @(final_step) / $abstime / analysis() smoke test (golden stdout).
+// Golden (p5_steps_smoke.expected, from LRM tables, not from any tool):
+//   Table 5-1, TRAN: initial_step and initial_step("tran") are 1 at the OP, initial_step("dc") is 0;
+//     final_step and final_step("tran") are 1 at the last point pN, final_step("dc") is 0.
+//   Table 4-22, TRAN OP: static=1 ic=1 tran=1 dc=0; TRAN points: static=0 ic=0 tran=1 dc=0.
+//   §5.10.2: final_step also fires on termination by $finish, here at 1000 ns, so $abstime = 1e-06.
+//   Statements in one event run in source order.
+`timescale 1ns/1ps
+`include "disciplines.vams"
+
+module top;
+  electrical a, gnd;
+  ground gnd;
+
+  analog begin
+    @(initial_step)
+      $display("initial_step t=%g static=%0d ic=%0d tran=%0d dc=%0d", $abstime,
+               analysis("static"), analysis("ic"), analysis("tran"), analysis("dc"));
+    @(initial_step("tran")) $display("initial_step(tran)");
+    @(initial_step("dc")) $display("initial_step(dc) MUST NOT PRINT");
+    @(final_step)
+      $display("final_step t=%g static=%0d ic=%0d tran=%0d dc=%0d", $abstime,
+               analysis("static"), analysis("ic"), analysis("tran"), analysis("dc"));
+    @(final_step("tran")) $display("final_step(tran)");
+    @(final_step("dc")) $display("final_step(dc) MUST NOT PRINT");
+    V(a, gnd) <+ 1.0;
+    I(a, gnd) <+ V(a, gnd) / 1.0e3;
+  end
+
+  initial #1000 $finish;
+endmodule

@@ -10,6 +10,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/expressions/AssertionExpr.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CheckerSymbols.h"
 #include "slang/ast/symbols/ClassSymbols.h"
@@ -27,6 +28,7 @@
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/diagnostics/ParserDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
 #include "slang/syntax/AllSyntax.h"
 #include "slang/util/SmallVector.h"
 #include "slang/util/TimeTrace.h"
@@ -318,6 +320,24 @@ void Scope::addMembers(const SyntaxNode& syntax) {
             addDeferredMembers(syntax);
             needsPrepass = true;
             break;
+        // SVMake VAMS P0.1: Verilog-AMS declarations.
+        case SyntaxKind::NatureDeclaration:
+            compilation.addNature(syntax.as<NatureDeclarationSyntax>(), *this);
+            break;
+        case SyntaxKind::DisciplineDeclaration:
+            compilation.addDiscipline(syntax.as<DisciplineDeclarationSyntax>(), *this);
+            break;
+        case SyntaxKind::GroundDeclaration:
+            addDeferredMembers(syntax);
+            needsPrepass = true;
+            break;
+        case SyntaxKind::BranchDeclaration: {
+            SmallVector<const BranchSymbol*> branches;
+            BranchSymbol::fromSyntax(*this, syntax.as<BranchDeclarationSyntax>(), branches);
+            for (auto branch : branches)
+                addMember(*branch);
+            break;
+        }
         case SyntaxKind::PortDeclaration:
             addDeferredMembers(syntax);
             break;
@@ -1104,6 +1124,9 @@ void Scope::elaborate() const {
                     handleDataDeclaration(context, node.as<DataDeclarationSyntax>(), symbol,
                                           nonAnsiPortDecls);
                     break;
+                case SyntaxKind::GroundDeclaration:
+                    handleGroundDeclaration(node.as<GroundDeclarationSyntax>(), symbol);
+                    break;
                 case SyntaxKind::PortDeclaration:
                     if (hasNonAnsiPorts)
                         nonAnsiPortDecls.push_back({&node, symbol});
@@ -1375,6 +1398,7 @@ void Scope::elaborate() const {
             }
             case SyntaxKind::UserDefinedNetDeclaration:
             case SyntaxKind::DataDeclaration:
+            case SyntaxKind::GroundDeclaration:
                 // Already handled above.
                 break;
             case SyntaxKind::BindDirective:
@@ -1444,6 +1468,74 @@ void Scope::elaborate() const {
         TimeTrace::endTrace();
 }
 
+NetSymbol* Scope::createDisciplineNet(const DisciplineSymbol& discipline,
+                                      const DeclaratorSyntax& decl,
+                                      const SyntaxNode& typeSyntax) const {
+    // SVMake VAMS P0.1: a net of the scope's default net type whose declared type is implicit
+    // (logic, with the declaration's packed range when it has one).
+    auto net = compilation.emplace<NetSymbol>(decl.name.valueText(), decl.name.location(),
+                                              getDefaultNetType());
+    if (typeSyntax.kind == SyntaxKind::ImplicitType)
+        net->setDeclaredType(typeSyntax.as<ImplicitTypeSyntax>());
+    else
+        net->setDeclaredType(compilation.createEmptyTypeSyntax(decl.name.location()));
+    net->setFromDeclarator(decl);
+    net->discipline = &discipline;
+    return net;
+}
+
+void Scope::handleGroundDeclaration(const GroundDeclarationSyntax& syntax,
+                                    const Symbol*& insertionPoint) const {
+    // SVMake VAMS P0.1: ground [ discipline_identifier ] [ range ] list_of_net_identifiers ;
+    // (VAMS-2023 3.6.4). Without a discipline each name must be a net already declared with a
+    // continuous discipline; with one, the nets are declared here.
+    const DisciplineSymbol* discipline = nullptr;
+    if (auto dname = syntax.discipline.valueText(); !dname.empty()) {
+        discipline = compilation.getDiscipline(dname);
+        if (!discipline) {
+            addDiag(diag::UnknownDiscipline, syntax.discipline.range()) << dname;
+            return;
+        }
+        if (!syntax.dimensions.empty()) {
+            addDiag(diag::VamsNotSupported, syntax.dimensions.sourceRange())
+                << "vector ground declarations"sv;
+        }
+
+        insertionPoint->indexInScope -= (uint32_t)syntax.declarators.size();
+        auto& typeSyntax = compilation.createEmptyTypeSyntax(syntax.keyword.location());
+        for (auto decl : syntax.declarators) {
+            auto net = createDisciplineNet(*discipline, *decl, typeSyntax);
+            net->setAttributes(*this, syntax.attributes);
+            if (discipline->isContinuous())
+                net->isGround = true;
+            else
+                addDiag(diag::GroundNotContinuous, decl->name.range()) << net->name;
+            insertMember(net, insertionPoint, true);
+            insertionPoint = net;
+        }
+        return;
+    }
+
+    for (auto decl : syntax.declarators) {
+        auto name = decl->name.valueText();
+        if (name.empty())
+            continue;
+
+        auto sym = find(name);
+        if (!sym) {
+            addDiag(diag::UndeclaredIdentifier, decl->name.range()) << name;
+            continue;
+        }
+
+        if (sym->kind != SymbolKind::Net || !sym->as<NetSymbol>().discipline ||
+            !sym->as<NetSymbol>().discipline->isContinuous()) {
+            addDiag(diag::GroundNotContinuous, decl->name.range()) << name;
+            continue;
+        }
+        sym->as<NetSymbol>().isGround = true;
+    }
+}
+
 void Scope::handleDataDeclaration(
     const ASTContext& context, const DataDeclarationSyntax& syntax, const Symbol*& insertionPoint,
     SmallVector<std::pair<const SyntaxNode*, const Symbol*>>& nonAnsiPortDecls) const {
@@ -1461,6 +1553,53 @@ void Scope::handleDataDeclaration(
     auto& namedType = syntax.type->as<NamedTypeSyntax>();
     std::string_view name = getIdentifierName(namedType);
     auto symbol = Lookup::unqualified(*this, name);
+
+    // SVMake VAMS P0.1: in Verilog-AMS source, a discipline name declares nets of that
+    // discipline (VAMS-2023 3.6.3). A local symbol of the same name wins.
+    // `electrical [3:0] bus;` parses as a named type with a select on the name.
+    if (isVamsScope(*this)) {
+        std::string_view vamsName = name;
+        const IdentifierSelectNameSyntax* select = nullptr;
+        if (namedType.name->kind == SyntaxKind::IdentifierSelectName) {
+            select = &namedType.name->as<IdentifierSelectNameSyntax>();
+            vamsName = select->identifier.valueText();
+        }
+
+        auto discipline = (symbol || (select && Lookup::unqualified(*this, vamsName)))
+                              ? nullptr
+                              : compilation.getDiscipline(vamsName);
+        if (discipline) {
+            const SyntaxNode* typeSyntax = &namedType;
+            if (select) {
+                // The range becomes the nets' packed dimension (VAMS-2023 3.6.3).
+                SmallVector<VariableDimensionSyntax*> dims;
+                for (auto sel : select->selectors) {
+                    if (!sel->selector || sel->selector->kind != SyntaxKind::SimpleRangeSelect) {
+                        addDiag(diag::VamsNotSupported, sel->sourceRange())
+                            << "discipline net declarations with this range"sv;
+                        continue;
+                    }
+                    auto clone = deepClone(*sel->selector, compilation);
+                    auto spec = compilation.emplace<RangeDimensionSpecifierSyntax>(*clone);
+                    dims.push_back(compilation.emplace<VariableDimensionSyntax>(
+                        sel->openBracket, spec, sel->closeBracket));
+                }
+                typeSyntax = compilation.emplace<ImplicitTypeSyntax>(
+                    Token(), SyntaxList<VariableDimensionSyntax>(compilation, dims),
+                    Token(compilation, TokenKind::Placeholder, {}, {},
+                          select->identifier.location()));
+            }
+
+            insertionPoint->indexInScope -= (uint32_t)syntax.declarators.size();
+            for (auto decl : syntax.declarators) {
+                auto net = createDisciplineNet(*discipline, *decl, *typeSyntax);
+                net->setAttributes(*this, syntax.attributes);
+                insertMember(net, insertionPoint, true);
+                insertionPoint = net;
+            }
+            return;
+        }
+    }
 
     // If we find a net type, this is actually one or more net symbols.
     if (symbol && symbol->kind == SymbolKind::NetType) {
@@ -1724,6 +1863,8 @@ static size_t countMembers(const SyntaxNode& syntax) {
             return syntax.as<DataDeclarationSyntax>().declarators.size();
         case SyntaxKind::UserDefinedNetDeclaration:
             return syntax.as<UserDefinedNetDeclarationSyntax>().declarators.size();
+        case SyntaxKind::GroundDeclaration:
+            return syntax.as<GroundDeclarationSyntax>().declarators.size();
         case SyntaxKind::PortDeclaration:
             return syntax.as<PortDeclarationSyntax>().declarators.size();
         case SyntaxKind::ClockingItem:

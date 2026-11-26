@@ -414,6 +414,13 @@ private:
     syntax::LibraryDeclarationSyntax& parseLibraryDecl();
     // clang-format on
 
+    // SVMake VAMS P0.1: Verilog-AMS declarations (Parser_vams.cpp).
+    syntax::NatureDeclarationSyntax& parseNatureDeclaration(AttrList attributes);
+    syntax::NatureAttributeSyntax* parseNatureAttribute();
+    syntax::DisciplineDeclarationSyntax& parseDisciplineDeclaration(AttrList attributes);
+    syntax::GroundDeclarationSyntax& parseGroundDeclaration(AttrList attributes);
+    syntax::BranchDeclarationSyntax& parseBranchDeclaration(AttrList attributes);
+
     template<bool (*IsEnd)(TokenKind)>
     syntax::SeparatedSyntaxList<syntax::DeclaratorSyntax> parseDeclarators(
         TokenKind endKind, Token& end, bitmask<DeclaratorOptions> options = {});

@@ -1,0 +1,21 @@
+SVMake VAMS P0.1 test data.
+
+disciplines.vams, constants.vams: Accellera VAMS-2023 Annex D.1 and D.2, the single copy svmake
+installs as its built-in Verilog-AMS include directory. Licence: LICENSES/LicenseRef-Accellera-VAMS-Annex-D.txt.
+
+- Source: the VAMS-2023 PDF (Feb 14, 2024), pages 406-413, rebuilt from `pdftotext -layout`
+  (page furniture removed: running headers, page numbers, copyright footers, and one blank line a
+  page break inserted inside the constants.vams header) and cross-checked token by token against
+  `pdftotext -raw` (equal). Accellera publishes no 2023 download; the published 2.4.0 files
+  (disciplines_2-4.vams, constants_2-4.vams) were used for the comparison below.
+- disciplines.vams  sha256 54e59ce56d44e8ef37ce8065fd796c7f90d7977e9687c379fd12ab8b8ab7c031
+  Whitespace-insensitive diff against 2.4.0: header only (copyright years and address, version line).
+- constants.vams    sha256 e921673710a9b88c71619b53718f23676f2482836e828d3e63f76ad3a5b879c9
+  Whitespace-insensitive diff against 2.4.0: header; the NIST2018 constants and the
+  PHYSICAL_CONSTANTS_NIST2018 switch (P_U0_OLD / P_U0_NIST2018); and ONE CORRECTION by svmake
+  (2026-11-26, approved by David Garau): the 2023 PDF prints "‘define P_U0 ‘P_U0_OLD" with
+  typographic quotes (U+2018), which does not preprocess; the shipped file has grave accents.
+  A comment line under the Accellera header marks the file as modified.
+
+c1top.vams, c1body.vh, c1plain.sv: Driver test for --map-keyword-version.
+proto/: byte-for-byte copies of svmake tests/rtl/vams/proto/*.vams (VAMS P0.5 fixtures).

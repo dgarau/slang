@@ -1319,6 +1319,25 @@ error CommandLineError "{}"
 warning command-line CommandLineWarning "{}"
 note NoteCommandLine "{}"
 
+subsystem Vams
+error VamsNotSupported "Verilog-AMS {} is not supported yet"
+error ExpectedNatureAttribute "expected a nature attribute"
+error ExpectedDisciplineItem "expected 'potential', 'flow' or 'domain'"
+error NatureRedefinition "redefinition of {} '{}' with a different body"
+error UnknownNature "unknown nature '{}'"
+error UnknownDiscipline "unknown discipline '{}'"
+error NatureAttributeNotName "the '{}' attribute of a nature must be a name"
+error NatureAttributeChanged "a derived nature cannot change the '{}' attribute of its parent"
+error NatureMissingAttribute "base nature '{}' does not define the required '{}' attribute"
+error NatureUnitsNotString "the units attribute of a nature must be a string"
+error DisciplineAccessConflict "discipline '{}' binds two natures with the same access function '{}'"
+error DisciplineDuplicateBinding "discipline '{}' binds its {} more than once"
+error GroundNotContinuous "ground net '{}' must have a continuous discipline"
+error BranchTerminalNotNet "a branch terminal must be a net"
+error BranchTerminalNoDiscipline "net '{}' has no continuous discipline"
+error BranchDisciplineMismatch "disciplines '{}' and '{}' are not compatible"
+error BranchSameTerminal "both terminals refer to the same net"
+
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.
 

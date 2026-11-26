@@ -21,6 +21,7 @@
 #include "slang/ast/statements/ConditionalStatements.h"
 #include "slang/ast/statements/LoopStatements.h"
 #include "slang/ast/statements/MiscStatements.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
 #include "slang/ast/symbols/AttributeSymbol.h"
 #include "slang/ast/symbols/BlockSymbols.h"
 #include "slang/ast/symbols/CheckerSymbols.h"
@@ -289,6 +290,10 @@ decltype(auto) Symbol::visit(TVisitor&& visitor, Args&&... args) const {
         SYMBOL(AnonymousProgram);
         SYMBOL(NetAlias);
         SYMBOL(ConfigBlock);
+        // SVMake VAMS P0.1
+        SYMBOL(Nature);
+        SYMBOL(Discipline);
+        SYMBOL(Branch);
         TYPE(PredefinedIntegerType);
         TYPE(ScalarType);
         TYPE(FloatingType);

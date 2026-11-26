@@ -121,7 +121,10 @@ enum class RandMode;
     x(SystemTimingCheck) \
     x(AnonymousProgram) \
     x(NetAlias) \
-    x(ConfigBlock)
+    x(ConfigBlock) \
+    x(Nature) \
+    x(Discipline) \
+    x(Branch)
 // clang-format on
 
 SLANG_ENUM(SymbolKind, SYMBOLKIND)

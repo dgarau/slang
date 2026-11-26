@@ -1392,6 +1392,17 @@ TEST_CASE("SyntaxTree/Compilation Invariant Checking") {
 // Directives are removed by the preprocessor, library map syntax
 // nodes can only exist when parsing library map files, etc.
 static constexpr auto IgnoredSyntaxKinds = {
+    // SVMake VAMS P0.1: Verilog-AMS syntax cannot appear in all.sv (a SystemVerilog file);
+    // tests/unittests/ast/VamsTests.cpp covers it.
+    SyntaxKind::NatureDeclaration,
+    SyntaxKind::NatureParentClause,
+    SyntaxKind::NatureAttribute,
+    SyntaxKind::DisciplineDeclaration,
+    SyntaxKind::DisciplineNatureBinding,
+    SyntaxKind::DisciplineDomainBinding,
+    SyntaxKind::DisciplineAttributeOverride,
+    SyntaxKind::GroundDeclaration,
+    SyntaxKind::BranchDeclaration,
     SyntaxKind::Unknown,
     SyntaxKind::BadExpression,
     SyntaxKind::CellDefineDirective,
@@ -1450,7 +1461,10 @@ static constexpr auto IgnoredSyntaxKinds = {
 static constexpr auto IgnoredSymbolKinds = {SymbolKind::Unknown,     SymbolKind::DeferredMember,
                                             SymbolKind::Attribute,   SymbolKind::Definition,
                                             SymbolKind::ErrorType,   SymbolKind::Field,
-                                            SymbolKind::UntypedType, SymbolKind::LocalAssertionVar};
+                                            SymbolKind::UntypedType, SymbolKind::LocalAssertionVar,
+                                            // SVMake VAMS P0.1 (see IgnoredSyntaxKinds)
+                                            SymbolKind::Nature,      SymbolKind::Discipline,
+                                            SymbolKind::Branch};
 
 TEST_CASE("Visit all file") {
     // Load a file containing all the SystemVerilog constructs and visit them

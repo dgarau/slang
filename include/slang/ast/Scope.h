@@ -28,6 +28,8 @@ namespace slang::ast {
 class ASTContext;
 class Compilation;
 class CompilationUnitSymbol;
+class DisciplineSymbol;
+class NetSymbol;
 class InstanceBodySymbol;
 class NetType;
 class WildcardImportSymbol;
@@ -293,6 +295,13 @@ private:
         const Symbol*& insertionPoint,
         SmallVector<std::pair<const syntax::SyntaxNode*, const Symbol*>>& nonAnsiPortDecls) const;
     void handleNestedDefinition(const syntax::ModuleDeclarationSyntax& syntax) const;
+
+    // SVMake VAMS P0.1
+    NetSymbol* createDisciplineNet(const DisciplineSymbol& discipline,
+                                   const syntax::DeclaratorSyntax& decl,
+                                   const syntax::SyntaxNode& typeSyntax) const;
+    void handleGroundDeclaration(const syntax::GroundDeclarationSyntax& syntax,
+                                 const Symbol*& insertionPoint) const;
     void handleExportedMethods() const;
     void checkImportConflict(const Symbol& member, const Symbol& existing) const;
     void addWildcardImport(const syntax::PackageImportItemSyntax& item,

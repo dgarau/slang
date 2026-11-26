@@ -1,0 +1,37 @@
+// VAMS P0.5 fixture 1: RC low-pass driven by a smooth near-step source (pure analog, no D2A/A2D).
+// Golden (golden.py, rc_step): with tau = R*C and source u(t) = 1 - exp(-t/tau_s),
+//   V(out)(t) = 1 - (tau_s*exp(-t/tau_s) - tau*exp(-t/tau)) / (tau_s - tau)
+// so V(out)(0) = 0 and dV(out)/dt(0) = 0, matching the DC operating point (u(0) = 0, ddt = 0 at DC).
+// tau_s = tau/10 makes the source a near step without a discontinuity (no $discontinuity or breakpoint
+// needed); as tau_s -> 0 the golden tends to 1 - exp(-t/tau).
+// Exercises: module flattening through two leaf modules with real parameters, ddt as state, $abstime in
+// a contribution, transient step control. Stop: 5 us = 5 tau (digital $finish, final_step at 5e-6).
+`timescale 1ns/1ps
+`include "disciplines.vams"
+
+module res(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 1.0e3;
+  analog I(p, n) <+ V(p, n) / r;
+endmodule
+
+module cap(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real c = 1.0e-9;
+  analog I(p, n) <+ c * ddt(V(p, n));
+endmodule
+
+module top;
+  electrical in, out, gnd;
+  ground gnd;
+  parameter real tau_s = 1.0e-7;
+
+  res #(.r(1.0e3)) r1 (in, out);
+  cap #(.c(1.0e-9)) c1 (out, gnd);
+
+  analog V(in, gnd) <+ 1.0 - exp(-$abstime / tau_s);
+
+  initial #5000 $finish;
+endmodule

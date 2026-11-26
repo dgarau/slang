@@ -29,6 +29,7 @@ target_sources(
           statements/ConditionalStatements.cpp
           statements/LoopStatements.cpp
           statements/MiscStatements.cpp
+          symbols/AnalogSymbols.cpp
           symbols/AttributeSymbol.cpp
           symbols/BlockSymbols.cpp
           symbols/CheckerSymbols.cpp

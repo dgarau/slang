@@ -1,0 +1,14 @@
+Copyright(c) 2009-2023 Accellera Systems Initiative Inc.
+8698 Elk Grove Blvd. Suite 1, #114, Elk Grove, CA, 95624, USA.
+
+The material in disciplines.vams (constants.vams) is an essential part of the Accellera Systems
+Initiative ("Accellera") Verilog-AMS Language Standard. Verbatim copies of
+the material in this Annex may be used and distributed without restriction.
+All other uses require permission from Accellera IP Committee
+(ipr-chair@lists.accellera.org).
+All other rights reserved.
+
+(Accellera Std VAMS-2023, Annex D: "The copyright for these three files differs from the rest of
+the Verilog-AMS HDL language reference manual to reflect that verbatim copies of these three
+standard definition files that make up this Annex may be used and distributed without
+restrictions.")

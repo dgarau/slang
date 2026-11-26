@@ -228,6 +228,13 @@ struct DiagnosticVisitor : public ASTVisitor<DiagnosticVisitor> {
         symbol.getValues();
     }
 
+    // SVMake VAMS P0.1
+    void handle(const BranchSymbol& symbol) {
+        if (!handleDefault(symbol))
+            return;
+        symbol.getDiscipline();
+    }
+
     void handle(const NetSymbol& symbol) {
         if (!handleDefault(symbol))
             return;

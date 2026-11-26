@@ -16,6 +16,7 @@
 namespace slang::ast {
 
 class AssertionPortSymbol;
+class DisciplineSymbol;
 class NetType;
 class TimingControl;
 
@@ -171,6 +172,13 @@ public:
     const NetType& netType;
     enum ExpansionHint { None, Vectored, Scalared } expansionHint = None;
     bool isImplicit = false;
+
+    /// SVMake VAMS P0.1: the net's Verilog-AMS discipline (VAMS-2023 3.6.3), or null.
+    const DisciplineSymbol* discipline = nullptr;
+
+    /// SVMake VAMS P0.1: the net was declared ground (VAMS-2023 3.6.4). Set by the scope's
+    /// member prepass, before any lookup can see the net.
+    mutable bool isGround = false;
 
     NetSymbol(std::string_view name, SourceLocation loc, const NetType& netType);
 

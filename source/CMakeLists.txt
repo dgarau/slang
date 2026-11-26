@@ -98,6 +98,7 @@ add_library(
   parsing/Parser_expressions.cpp
   parsing/Parser_members.cpp
   parsing/Parser_statements.cpp
+  parsing/Parser_vams.cpp
   parsing/ParserBase.cpp
   parsing/ParserMetadata.cpp
   parsing/Preprocessor.cpp

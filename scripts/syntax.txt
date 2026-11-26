@@ -2384,3 +2384,62 @@ LibraryIncludeStatement base=Member
 token include
 FilePathSpec filePath
 token semi
+
+// ----- SVMake VAMS P0.1: Verilog-AMS (Accellera VAMS-2023) -----
+
+NatureParentClause
+token colon
+token name
+token dot
+token potentialOrFlow
+
+NatureAttribute
+token name
+token equals
+Expression value
+token semi
+
+NatureDeclaration base=Member
+token keyword
+token name
+NatureParentClause? parent
+token semi
+list<NatureAttribute> items
+token end
+
+DisciplineNatureBinding
+token potentialOrFlow
+token nature
+token semi
+
+DisciplineDomainBinding
+token domain
+token value
+token semi
+
+DisciplineAttributeOverride
+token potentialOrFlow
+token dot
+NatureAttribute attribute
+
+DisciplineDeclaration base=Member
+token keyword
+token name
+token semi
+list<SyntaxNode> items
+token end
+
+GroundDeclaration base=Member
+token keyword
+token discipline
+list<VariableDimension> dimensions
+separated_list<Declarator> declarators
+token semi
+
+BranchDeclaration base=Member
+token keyword
+token openParen
+separated_list<Expression> terminals
+token closeParen
+separated_list<Declarator> declarators
+token semi

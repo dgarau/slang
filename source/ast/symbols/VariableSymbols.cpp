@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/symbols/VariableSymbols.h"
 
+#include "slang/ast/symbols/AnalogSymbols.h"
+
 #include "slang/ast/ASTContext.h"
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
@@ -562,6 +564,12 @@ void NetSymbol::serializeTo(ASTSerializer& serializer) const {
 
     if (isImplicit)
         serializer.write("isImplicit", isImplicit);
+
+    // SVMake VAMS P0.1
+    if (discipline)
+        serializer.writeLink("discipline", *discipline);
+    if (isGround)
+        serializer.write("isGround", true);
 
     switch (expansionHint) {
         case Vectored:

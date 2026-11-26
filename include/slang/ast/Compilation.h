@@ -33,7 +33,9 @@ class ASTContext;
 class CompilationUnitSymbol;
 class ConfigBlockSymbol;
 class DefinitionSymbol;
+class DisciplineSymbol;
 class Expression;
+class NatureSymbol;
 class GenericClassDefSymbol;
 class InstanceSymbol;
 class InterfacePortSymbol;
@@ -522,6 +524,22 @@ public:
 
     /// Gets the package with the give name, or nullptr if there is no such package.
     const PackageSymbol* getPackage(std::string_view name) const;
+
+    /// SVMake VAMS P0.1: Verilog-AMS natures and disciplines are compilation-wide description
+    /// items (VAMS-2023 3.6). They live here, not in any scope's name map. A declaration whose
+    /// tokens equal an earlier one of the same name (the same standard include read by two
+    /// compilation units, or two libraries) is the same declaration.
+    const NatureSymbol* getNature(std::string_view name) const;
+    const DisciplineSymbol* getDiscipline(std::string_view name) const;
+    std::span<const NatureSymbol* const> getNatures() const { return natureList; }
+    std::span<const DisciplineSymbol* const> getDisciplines() const { return disciplineList; }
+
+    /// SVMake VAMS P0.1: true if some nature names @a name as its access function.
+    bool isAccessName(std::string_view name) const;
+
+    /// SVMake VAMS P0.1: registers a nature or discipline declared in @a unit.
+    void addNature(const syntax::NatureDeclarationSyntax& syntax, const Scope& unit);
+    void addDiscipline(const syntax::DisciplineDeclarationSyntax& syntax, const Scope& unit);
 
     /// Gets the built-in 'std' package.
     const PackageSymbol& getStdPackage() const { return *stdPkg; }
@@ -1064,6 +1082,12 @@ private:
     // which is why they can't share the definitions name table.
     flat_hash_map<std::string_view, const PackageSymbol*> packageMap;
 
+    // SVMake VAMS P0.1: Verilog-AMS natures and disciplines.
+    flat_hash_map<std::string_view, const NatureSymbol*> natureMap;
+    flat_hash_map<std::string_view, const DisciplineSymbol*> disciplineMap;
+    std::vector<const NatureSymbol*> natureList;
+    std::vector<const DisciplineSymbol*> disciplineList;
+
     // A list of known system subroutines, indexed via KnownSystemName values.
     std::vector<std::shared_ptr<SystemSubroutine>> systemSubroutines;
 
@@ -1089,6 +1113,7 @@ private:
         std::optional<TimeScale> timeScale;
         UnconnectedDrive unconnectedDrive = UnconnectedDrive::None;
         bool cellDefine = false;
+        bool vamsSource = false; // SVMake VAMS P0.1
     };
 
     // Map from syntax nodes to parse-time metadata about them.

@@ -77,7 +77,7 @@ MemberSyntax& Parser::parseModule(AttrList attributes, SyntaxKind parentKind,
 
     SyntaxKind declKind = getModuleDeclarationKind(header.moduleKeyword.kind);
     ParserMetadata::Node node{pp.getDefaultNetType(), pp.getUnconnectedDrive(), pp.getCellDefine(),
-                              pp.getTimeScale()};
+                              pp.getTimeScale(), pp.isVamsSource()};
 
     auto savedDefinitionKind = currentDefinitionKind;
     currentDefinitionKind = declKind;
@@ -328,6 +328,15 @@ MemberSyntax* Parser::parseMemberImpl(AttrList attributes, SyntaxKind parentKind
         }
         case TokenKind::AssignKeyword:
             return &parseContinuousAssign(attributes);
+        // SVMake VAMS P0.1: Verilog-AMS declarations (only lexed in VAMS source).
+        case TokenKind::NatureKeyword:
+            return &parseNatureDeclaration(attributes);
+        case TokenKind::DisciplineKeyword:
+            return &parseDisciplineDeclaration(attributes);
+        case TokenKind::GroundKeyword:
+            return &parseGroundDeclaration(attributes);
+        case TokenKind::BranchKeyword:
+            return &parseBranchDeclaration(attributes);
         case TokenKind::InitialKeyword: {
             auto keyword = consume();
             return &factory.proceduralBlock(getProceduralBlockKind(keyword.kind), attributes,

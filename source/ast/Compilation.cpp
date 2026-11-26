@@ -19,6 +19,7 @@
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/Diagnostics.h"
 #include "slang/diagnostics/LookupDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/AllSyntax.h"
@@ -322,6 +323,7 @@ void Compilation::addSyntaxTree(std::shared_ptr<SyntaxTree> tree) {
         }
 
         result.cellDefine = meta.cellDefine;
+        result.vamsSource = meta.vamsSource;
 
         syntaxMetadata[n] = result;
     }
@@ -964,6 +966,7 @@ void Compilation::createDefinition(const Scope& scope, LookupLocation location,
                        metadata.cellDefine, metadata.timeScale, metadata.tree))
                    .get();
 
+    def->isVams = metadata.vamsSource;
     insertDefinition(*def, scope);
 
     auto targetScope = scope.asSymbol().kind == SymbolKind::CompilationUnit ? root.get() : &scope;
@@ -1129,6 +1132,84 @@ const PackageSymbol* Compilation::getPackage(std::string_view lookupName) const 
     if (it == packageMap.end())
         return nullptr;
     return it->second;
+}
+
+// SVMake VAMS P0.1: Verilog-AMS natures and disciplines.
+static void collectTokens(const SyntaxNode& node, SmallVectorBase<Token>& out) {
+    for (size_t i = 0, count = node.getChildCount(); i < count; i++) {
+        if (auto child = node.childNode(i))
+            collectTokens(*child, out);
+        else if (auto token = node.childToken(i))
+            out.push_back(token);
+    }
+}
+
+static bool sameDeclarationTokens(const SyntaxNode& a, const SyntaxNode& b) {
+    SmallVector<Token> ta, tb;
+    collectTokens(a, ta);
+    collectTokens(b, tb);
+    if (ta.size() != tb.size())
+        return false;
+    for (size_t i = 0; i < ta.size(); i++) {
+        if (ta[i].kind != tb[i].kind || ta[i].rawText() != tb[i].rawText())
+            return false;
+    }
+    return true;
+}
+
+template<typename TSymbol, typename TSyntax>
+static void addVamsDeclaration(Compilation& comp, const TSyntax& syntax, const Scope& unit,
+                               flat_hash_map<std::string_view, const TSymbol*>& map,
+                               std::vector<const TSymbol*>& list, std::string_view what) {
+    auto name = syntax.name.valueText();
+    if (name.empty())
+        return;
+
+    if (auto it = map.find(name); it != map.end()) {
+        // The same declaration read again (a standard include in two compilation units or two
+        // libraries) is the same nature or discipline; a different body is an error.
+        auto prev = it->second->getSyntax();
+        if (prev && sameDeclarationTokens(*prev, syntax))
+            return;
+
+        auto& diag = unit.addDiag(diag::NatureRedefinition, syntax.name.range());
+        diag << what << name;
+        diag.addNote(diag::NotePreviousDefinition, it->second->location);
+        return;
+    }
+
+    auto sym = comp.emplace<TSymbol>(name, syntax.name.location());
+    sym->setSyntax(syntax);
+    sym->setParent(unit);
+    map.emplace(name, sym);
+    list.push_back(sym);
+}
+
+void Compilation::addNature(const NatureDeclarationSyntax& syntax, const Scope& unit) {
+    addVamsDeclaration<NatureSymbol>(*this, syntax, unit, natureMap, natureList, "nature"sv);
+}
+
+void Compilation::addDiscipline(const DisciplineDeclarationSyntax& syntax, const Scope& unit) {
+    addVamsDeclaration<DisciplineSymbol>(*this, syntax, unit, disciplineMap, disciplineList,
+                                         "discipline"sv);
+}
+
+const NatureSymbol* Compilation::getNature(std::string_view name) const {
+    auto it = natureMap.find(name);
+    return it == natureMap.end() ? nullptr : it->second;
+}
+
+const DisciplineSymbol* Compilation::getDiscipline(std::string_view name) const {
+    auto it = disciplineMap.find(name);
+    return it == disciplineMap.end() ? nullptr : it->second;
+}
+
+bool Compilation::isAccessName(std::string_view name) const {
+    for (auto nature : natureList) {
+        if (nature->getAccessName() == name)
+            return true;
+    }
+    return false;
 }
 
 const PackageSymbol& Compilation::createPackage(const Scope& scope,
@@ -1830,6 +1911,13 @@ void Compilation::elaborate() {
     uint32_t errorLimit = options.errorLimit == 0 ? UINT32_MAX : options.errorLimit;
     DiagnosticVisitor elabVisitor(*this, numErrors, errorLimit);
     rootSym.visit(elabVisitor);
+
+    // SVMake VAMS P0.1: natures and disciplines are not in any scope; resolve them here so
+    // their diagnostics are issued.
+    for (auto nature : std::vector<const NatureSymbol*>(natureList))
+        nature->check();
+    for (auto discipline : std::vector<const DisciplineSymbol*>(disciplineList))
+        discipline->check();
 
     if (!elabVisitor.finishedEarly())
         elabVisitor.finalize();

@@ -209,6 +209,9 @@ public:
     /// Whether this definition is a cell definition.
     bool cellDefine = false;
 
+    /// SVMake VAMS P0.1: the definition was parsed as Verilog-AMS source text.
+    bool isVams = false;
+
     /// The timescale specified for this definition, or nullopt if none
     /// is explicitly specified.
     std::optional<TimeScale> timeScale;

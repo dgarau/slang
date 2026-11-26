@@ -1,0 +1,37 @@
+// VAMS P0.5 fixture 2: half-wave rectifier, diode + resistive load, no capacitor (pure analog).
+// Golden (golden.py, diode_rect): the circuit is ALGEBRAIC at every time point, so the exact answer at any
+// t is the root of  Is*(exp((vin(t) - vout)/vt) - 1) = vout/R  with vin(t) = A*sin(2*pi*f*t); golden.py
+// solves it by bisection to 1e-15 V. limexp() equals exp() at convergence (VAMS §4.5.13), so the golden
+// uses exp. vt is a parameter (not $vt) so the golden does not depend on the temperature model.
+// Exercises: Newton on an exponential nonlinearity, limexp, flattening, sin() of $abstime.
+// Stop: 2 ms = two periods.
+`timescale 1ns/1ps
+`include "disciplines.vams"
+`include "constants.vams"
+
+module diode(a, c);
+  inout a, c;
+  electrical a, c;
+  parameter real is = 1.0e-14;
+  parameter real vt = 0.025852;
+  analog I(a, c) <+ is * (limexp(V(a, c) / vt) - 1.0);
+endmodule
+
+module res(p, n);
+  inout p, n;
+  electrical p, n;
+  parameter real r = 1.0e3;
+  analog I(p, n) <+ V(p, n) / r;
+endmodule
+
+module top;
+  electrical in, out, gnd;
+  ground gnd;
+
+  diode d1 (in, out);
+  res #(.r(1.0e3)) rl (out, gnd);
+
+  analog V(in, gnd) <+ 2.0 * sin(2.0 * `M_PI * 1.0e3 * $abstime);
+
+  initial #2000000 $finish;
+endmodule

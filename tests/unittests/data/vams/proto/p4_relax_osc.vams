@@ -1,0 +1,38 @@
+// VAMS P0.5 fixture 4: relaxation oscillator with a digital Schmitt state and a cycle counter
+// (repeated A2D/D2A sync; overshooting steps must be rejected and re-solved at each crossing).
+// drv = transition(state, 0, 10n, 10n) into R = 1k, C = 1n (tau = 1 us). state starts 0, so the DC point has
+// V(c) = 0; state goes 1 at 100 ns. cross(V(c) - 0.7, +1) sets state 0, cross(V(c) - 0.3, -1) sets it 1;
+// each posedge of state counts one cycle.
+// Golden (golden.py, relax_osc): exact piecewise closed form of the RC under the ramps, crossing times found
+// by bisection on it. With ideal edges the first charge takes tau*ln(1/0.3) = 1.204 us and every half cycle
+// after it tau*ln(0.7/0.3) = 0.847 us; the 10 ns edges shift that slightly and golden.py includes them.
+// Graded: every state/count line (time within the window of golden.py), the final count, and V(c) before the
+// first crossing.
+// Stop: 20 us.
+`timescale 1ns/1ps
+`include "disciplines.vams"
+
+module top;
+  electrical drv, c, gnd;
+  ground gnd;
+  reg state = 1'b0;
+  integer count = 0;
+
+  analog begin
+    V(drv, gnd) <+ transition(state ? 1.0 : 0.0, 0.0, 1.0e-8, 1.0e-8);
+    I(drv, c) <+ V(drv, c) / 1.0e3;
+    I(c, gnd) <+ 1.0e-9 * ddt(V(c, gnd));
+  end
+
+  always @(cross(V(c) - 0.7, +1, 1.0e-12)) state <= 1'b0;
+  always @(cross(V(c) - 0.3, -1, 1.0e-12)) state <= 1'b1;
+  always @(posedge state) count <= count + 1;
+  always @(state) $display("state=%b t=%0.3f", state, $realtime);
+  always @(count) $display("count=%0d t=%0.3f", count, $realtime);
+
+  initial #100 state = 1'b1;
+  initial #20000 begin
+    $display("final count=%0d", count);
+    $finish;
+  end
+endmodule

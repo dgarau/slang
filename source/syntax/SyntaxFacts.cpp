@@ -1312,6 +1312,9 @@ bool SyntaxFacts::isAllowedInCompilationUnit(SyntaxKind kind) {
         case SyntaxKind::ExternModuleDecl:
         case SyntaxKind::ExternUdpDecl:
         case SyntaxKind::ConfigDeclaration:
+        // SVMake VAMS P0.1: Verilog-AMS description items.
+        case SyntaxKind::NatureDeclaration:
+        case SyntaxKind::DisciplineDeclaration:
             return true;
         default:
             return isAllowedInPackage(kind);
@@ -1322,6 +1325,9 @@ bool SyntaxFacts::isAllowedInGenerate(SyntaxKind kind) {
     switch (kind) {
         case SyntaxKind::DefParam:
         case SyntaxKind::PrimitiveInstantiation:
+        // SVMake VAMS P0.1: Verilog-AMS module items.
+        case SyntaxKind::GroundDeclaration:
+        case SyntaxKind::BranchDeclaration:
             return true;
         default:
             return isModuleCommonItem(kind);
