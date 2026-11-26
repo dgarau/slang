@@ -337,6 +337,8 @@ MemberSyntax* Parser::parseMemberImpl(AttrList attributes, SyntaxKind parentKind
             return &parseGroundDeclaration(attributes);
         case TokenKind::BranchKeyword:
             return &parseBranchDeclaration(attributes);
+        case TokenKind::AnalogKeyword:
+            return &parseAnalogBlock(attributes);
         case TokenKind::InitialKeyword: {
             auto keyword = consume();
             return &factory.proceduralBlock(getProceduralBlockKind(keyword.kind), attributes,

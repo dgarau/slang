@@ -8,6 +8,7 @@
 #pragma once
 
 #include "slang/ast/Expression.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
 #include "slang/ast/HierarchicalReference.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/ast/expressions/AssertionExpr.h"
@@ -141,6 +142,62 @@ public:
 /// This is for cases like the $printtimescale system function that require a
 /// module name to be passed. This is not a NamedValueExpression because the
 /// symbol in question is not a value and is not normally usable in an expression.
+/// SVMake VAMS P0.1: a Verilog-AMS branch access (VAMS-2023 4.4): V(a, b), I(br), potential(a),
+/// flow(a, b). Either a named branch, or one or two terminals (an unnamed branch; a single
+/// terminal goes to implicit ground). Its type is real.
+class SLANG_EXPORT BranchAccessExpression final : public Expression {
+public:
+    enum class Access { Potential, Flow };
+
+    /// Whether the potential or the flow of the branch is accessed.
+    Access access;
+
+    /// The nature accessed, and the discipline of the branch.
+    not_null<const NatureSymbol*> nature;
+    not_null<const DisciplineSymbol*> discipline;
+
+    /// The named branch, or null for an unnamed branch.
+    const BranchSymbol* branch;
+
+    /// The terminals (for a named branch, copies of the branch's terminals).
+    AnalogTerminal positive;
+    std::optional<AnalogTerminal> negative;
+
+    /// The access function name used (empty for potential() / flow()).
+    std::string_view accessName;
+
+    BranchAccessExpression(const Type& type, Access access, const NatureSymbol& nature,
+                           const DisciplineSymbol& discipline, const BranchSymbol* branch,
+                           const AnalogTerminal& positive,
+                           const std::optional<AnalogTerminal>& negative,
+                           std::string_view accessName, SourceRange sourceRange) :
+        Expression(ExpressionKind::BranchAccess, type, sourceRange), access(access),
+        nature(&nature), discipline(&discipline), branch(branch), positive(positive),
+        negative(negative), accessName(accessName) {}
+
+    ConstantValue evalImpl(EvalContext& context) const;
+    bool isEquivalentImpl(const BranchAccessExpression& rhs) const;
+
+    void serializeTo(ASTSerializer& serializer) const;
+
+    /// Binds an access function call. @a generic is set for potential() / flow(); otherwise
+    /// @a name is matched against the discipline's nature access names.
+    static Expression& fromSyntax(Compilation& compilation, std::string_view name,
+                                  std::optional<Access> generic,
+                                  const syntax::InvocationExpressionSyntax& invocation,
+                                  const ASTContext& context);
+
+    static bool isKind(ExpressionKind kind) { return kind == ExpressionKind::BranchAccess; }
+
+    template<typename TVisitor>
+    void visitExprs(TVisitor&& visitor) const {
+        if (positive.expr)
+            positive.expr->visit(visitor);
+        if (negative && negative->expr)
+            negative->expr->visit(visitor);
+    }
+};
+
 class SLANG_EXPORT ArbitrarySymbolExpression final : public Expression {
 public:
     /// The symbol being referenced.

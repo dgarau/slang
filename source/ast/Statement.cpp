@@ -14,6 +14,7 @@
 #include "slang/ast/Expression.h"
 #include "slang/ast/TimingControl.h"
 #include "slang/diagnostics/ConstEvalDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/syntax/AllSyntax.h"
 
@@ -187,6 +188,10 @@ const Statement& Statement::bind(const StatementSyntax& syntax, const ASTContext
             result = &ExpressionStatement::fromSyntax(comp, syntax.as<ExpressionStatementSyntax>(),
                                                       context, stmtCtx);
             break;
+        case SyntaxKind::ContributionStatement:
+            result = &ContributionStatement::fromSyntax(
+                comp, syntax.as<ContributionStatementSyntax>(), context);
+            break;
         case SyntaxKind::VoidCastedCallStatement:
             result = &ExpressionStatement::fromSyntax(comp,
                                                       syntax.as<VoidCastedCallStatementSyntax>(),
@@ -277,6 +282,47 @@ const Statement& Statement::bind(const StatementSyntax& syntax, const ASTContext
 
     result->syntax = &syntax;
     context.setAttributes(*result, syntax.attributes);
+
+    // SVMake VAMS P0.1: digital-only statements in an analog block (VAMS-2023 5.2, A.6).
+    // Event controls on digital events stay legal (5.10.5).
+    if (context.flags.has(ASTFlags::AnalogBlock) && !result->bad()) {
+        std::string_view what;
+        switch (result->kind) {
+            case StatementKind::Timed:
+                switch (result->as<TimedStatement>().timing.kind) {
+                    case TimingControlKind::Delay:
+                    case TimingControlKind::Delay3:
+                    case TimingControlKind::OneStepDelay:
+                    case TimingControlKind::CycleDelay:
+                        what = "a delay control"sv;
+                        break;
+                    default:
+                        break;
+                }
+                break;
+            case StatementKind::Wait:
+            case StatementKind::WaitFork:
+            case StatementKind::WaitOrder:
+                what = "a wait statement"sv;
+                break;
+            case StatementKind::Block:
+                if (result->as<BlockStatement>().blockKind != StatementBlockKind::Sequential)
+                    what = "a fork-join block"sv;
+                break;
+            case StatementKind::ExpressionStatement: {
+                auto& expr = result->as<ExpressionStatement>().expr;
+                if (expr.kind == ExpressionKind::Assignment &&
+                    expr.as<AssignmentExpression>().isNonBlocking()) {
+                    what = "a nonblocking assignment"sv;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        if (!what.empty())
+            context.addDiag(diag::NotAllowedInAnalog, syntax.sourceRange()) << what;
+    }
     return *result;
 }
 
@@ -505,6 +551,7 @@ static void findBlocks(const Scope& scope, const StatementSyntax& syntax,
         case SyntaxKind::ExpressionStatement:
         case SyntaxKind::WaitForkStatement:
         case SyntaxKind::VoidCastedCallStatement:
+        case SyntaxKind::ContributionStatement:
             // These statements don't have child statements within them.
             return;
 

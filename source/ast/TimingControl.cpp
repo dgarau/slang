@@ -14,6 +14,8 @@
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
+#include "slang/text/CharInfo.h"
 #include "slang/diagnostics/StatementsDiags.h"
 #include "slang/syntax/AllSyntax.h"
 
@@ -181,6 +183,14 @@ TimingControl& DelayControl::fromSyntax(Compilation& compilation, const DelaySyn
     auto result = compilation.emplace<DelayControl>(expr, syntax.sourceRange());
     if (expr.bad())
         return badCtrl(compilation, result);
+
+    // SVMake VAMS P0.1: VAMS-2023 2.6.2, scale factors are not allowed in digital delays (#5u).
+    // Only Verilog-AMS source lexes them: a real literal whose text ends in the scale letter.
+    if (syntax.delayValue->kind == SyntaxKind::RealLiteralExpression) {
+        auto raw = syntax.delayValue->as<LiteralExpressionSyntax>().literal.rawText();
+        if (!raw.empty() && isAlphaNumeric(raw.back()) && !isDecimalDigit(raw.back()))
+            context.addDiag(diag::ScaledDelay, syntax.delayValue->sourceRange());
+    }
 
     if (!expr.type->isNumeric()) {
         context.addDiag(diag::DelayNotNumeric, expr.sourceRange) << *expr.type;

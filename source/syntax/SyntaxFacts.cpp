@@ -356,6 +356,9 @@ bool SyntaxFacts::isPossibleExpression(TokenKind kind) {
         case TokenKind::DistKeyword:
             return true;
         default:
+            // SVMake VAMS P0.1
+            if (isAnalogBuiltinKeyword(kind))
+                return true;
             break;
     }
 
@@ -428,7 +431,8 @@ bool SyntaxFacts::isPossibleStatement(TokenKind kind) {
         case TokenKind::Semicolon:
             return true;
         default:
-            return false;
+            // SVMake VAMS P0.1: potential(a) <+ ..., flow(br) <+ ...
+            return isAnalogBuiltinKeyword(kind);
     }
 }
 
@@ -606,6 +610,9 @@ bool SyntaxFacts::isPossibleArgument(TokenKind kind) {
         case TokenKind::NegEdgeKeyword:
             return true;
         default:
+            // SVMake VAMS P0.1
+            if (isAnalogBuiltinKeyword(kind))
+                return true;
             return isPossibleExpression(kind);
     }
 }
@@ -718,6 +725,70 @@ bool SyntaxFacts::isIdentifierOrComma(TokenKind kind) {
 
 bool SyntaxFacts::isNotIdOrComma(TokenKind kind) {
     return kind != TokenKind::Identifier && kind != TokenKind::Comma;
+}
+
+bool SyntaxFacts::isAnalogBuiltinKeyword(TokenKind kind) {
+    switch (kind) {
+        case TokenKind::LnKeyword:
+        case TokenKind::Ln1pKeyword:
+        case TokenKind::LogKeyword:
+        case TokenKind::ExpKeyword:
+        case TokenKind::Expm1Keyword:
+        case TokenKind::SqrtKeyword:
+        case TokenKind::MinKeyword:
+        case TokenKind::MaxKeyword:
+        case TokenKind::AbsKeyword:
+        case TokenKind::PowKeyword:
+        case TokenKind::FloorKeyword:
+        case TokenKind::CeilKeyword:
+        case TokenKind::SinKeyword:
+        case TokenKind::CosKeyword:
+        case TokenKind::TanKeyword:
+        case TokenKind::AsinKeyword:
+        case TokenKind::AcosKeyword:
+        case TokenKind::AtanKeyword:
+        case TokenKind::Atan2Keyword:
+        case TokenKind::HypotKeyword:
+        case TokenKind::SinhKeyword:
+        case TokenKind::CoshKeyword:
+        case TokenKind::TanhKeyword:
+        case TokenKind::AsinhKeyword:
+        case TokenKind::AcoshKeyword:
+        case TokenKind::AtanhKeyword:
+        case TokenKind::DdtKeyword:
+        case TokenKind::DdxKeyword:
+        case TokenKind::IdtKeyword:
+        case TokenKind::IdtmodKeyword:
+        case TokenKind::AbsdelayKeyword:
+        case TokenKind::TransitionKeyword:
+        case TokenKind::SlewKeyword:
+        case TokenKind::LastCrossingKeyword:
+        case TokenKind::LimexpKeyword:
+        case TokenKind::LaplaceNdKeyword:
+        case TokenKind::LaplaceNpKeyword:
+        case TokenKind::LaplaceZdKeyword:
+        case TokenKind::LaplaceZpKeyword:
+        case TokenKind::ZiNdKeyword:
+        case TokenKind::ZiNpKeyword:
+        case TokenKind::ZiZdKeyword:
+        case TokenKind::ZiZpKeyword:
+        case TokenKind::AcStimKeyword:
+        case TokenKind::WhiteNoiseKeyword:
+        case TokenKind::FlickerNoiseKeyword:
+        case TokenKind::NoiseTableKeyword:
+        case TokenKind::NoiseTableLogKeyword:
+        case TokenKind::AnalysisKeyword:
+        case TokenKind::InitialStepKeyword:
+        case TokenKind::FinalStepKeyword:
+        case TokenKind::AboveKeyword:
+        case TokenKind::TimerKeyword:
+        case TokenKind::AbsdeltaKeyword:
+        case TokenKind::PotentialKeyword:
+        case TokenKind::FlowKeyword:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool SyntaxFacts::isPossibleExpressionOrComma(TokenKind kind) {
@@ -1328,6 +1399,7 @@ bool SyntaxFacts::isAllowedInGenerate(SyntaxKind kind) {
         // SVMake VAMS P0.1: Verilog-AMS module items.
         case SyntaxKind::GroundDeclaration:
         case SyntaxKind::BranchDeclaration:
+        case SyntaxKind::AnalogBlock:
             return true;
         default:
             return isModuleCommonItem(kind);

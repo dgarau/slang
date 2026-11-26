@@ -331,6 +331,9 @@ void Scope::addMembers(const SyntaxNode& syntax) {
             addDeferredMembers(syntax);
             needsPrepass = true;
             break;
+        case SyntaxKind::AnalogBlock:
+            addMember(AnalogBlockSymbol::fromSyntax(*this, syntax.as<AnalogBlockSyntax>()));
+            break;
         case SyntaxKind::BranchDeclaration: {
             SmallVector<const BranchSymbol*> branches;
             BranchSymbol::fromSyntax(*this, syntax.as<BranchDeclarationSyntax>(), branches);

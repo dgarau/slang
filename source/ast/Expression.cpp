@@ -6,6 +6,8 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "slang/ast/Expression.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
+#include "slang/ast/expressions/MiscExpressions.h"
 
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
@@ -1150,6 +1152,33 @@ Expression& Expression::bindName(Compilation& comp, const NameSyntax& syntax,
             if (Lookup::findAssertionLocalVar(context, syntax, result)) {
                 result.reportDiags(context);
                 return bindLookupResult(comp, result, invocation, withClause, context);
+            }
+        }
+    }
+
+    // SVMake VAMS P0.1: Verilog-AMS access functions (VAMS-2023 4.4). potential() / flow() are
+    // keywords; any other name is an access function when some nature names it and nothing in
+    // scope does (a user symbol of the same name wins).
+    if (invocation && isVamsScope(*context.scope)) {
+        if (syntax.kind == SyntaxKind::SystemName) {
+            auto tk = syntax.as<SystemNameSyntax>().systemIdentifier.kind;
+            if (tk == TokenKind::PotentialKeyword || tk == TokenKind::FlowKeyword) {
+                return BranchAccessExpression::fromSyntax(
+                    comp, {},
+                    tk == TokenKind::PotentialKeyword ? BranchAccessExpression::Access::Potential
+                                                      : BranchAccessExpression::Access::Flow,
+                    *invocation, context);
+            }
+        }
+        else if (syntax.kind == SyntaxKind::IdentifierName) {
+            auto name = syntax.as<IdentifierNameSyntax>().identifier.valueText();
+            if (comp.isAccessName(name)) {
+                LookupResult probe;
+                Lookup::name(syntax, context, flags | LookupFlags::NoUndeclaredError, probe);
+                if (!probe.found && !probe.systemSubroutine && !probe.hasError()) {
+                    return BranchAccessExpression::fromSyntax(comp, name, std::nullopt,
+                                                              *invocation, context);
+                }
             }
         }
     }

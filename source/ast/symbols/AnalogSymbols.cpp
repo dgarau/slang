@@ -559,3 +559,239 @@ void BranchSymbol::serializeTo(ASTSerializer& serializer) const {
 }
 
 } // namespace slang::ast
+
+// ----- SVMake VAMS P0.1 C3: analog blocks, branch access, contributions -----
+
+#include "slang/ast/EvalContext.h"
+#include "slang/ast/Lookup.h"
+#include "slang/ast/Statement.h"
+#include "slang/ast/statements/MiscStatements.h"
+#include "slang/ast/symbols/BlockSymbols.h"
+#include "slang/diagnostics/ConstEvalDiags.h"
+#include "slang/util/ScopeGuard.h"
+
+namespace slang::ast {
+
+using namespace syntax;
+using namespace parsing;
+
+AnalogBlockSymbol& AnalogBlockSymbol::fromSyntax(Scope& scope, const AnalogBlockSyntax& syntax) {
+    auto& comp = scope.getCompilation();
+    auto result = comp.emplace<AnalogBlockSymbol>(syntax.keyword.location(),
+                                                  syntax.initial.kind == TokenKind::InitialKeyword);
+    result->setSyntax(syntax);
+    result->setAttributes(scope, syntax.attributes);
+    result->stmtSyntax = syntax.statement;
+
+    SmallVector<const SyntaxNode*> extraMembers;
+    SmallVector<const SyntaxNode*> enumSyntax;
+    result->blocks = Statement::createBlockItems(scope, *syntax.statement,
+                                                 /* labelHandled */ false, extraMembers,
+                                                 enumSyntax);
+    for (auto node : enumSyntax)
+        scope.addEnumMembers(*node);
+    for (auto b : result->blocks)
+        scope.addMember(*b);
+    for (auto member : extraMembers)
+        scope.addMembers(*member);
+
+    return *result;
+}
+
+const Statement& AnalogBlockSymbol::getBody() const {
+    if (!stmt) {
+        SLANG_ASSERT(!isConstructing);
+        isConstructing = true;
+        auto guard = ScopeGuard([this] { isConstructing = false; });
+
+        auto scope = getParentScope();
+        SLANG_ASSERT(scope && stmtSyntax);
+
+        ASTContext context(*scope, LookupLocation::after(*this));
+        context.flags |= ASTFlags::AnalogBlock;
+        if (isInitial)
+            context.flags |= ASTFlags::AnalogInitial;
+
+        Statement::StatementContext stmtCtx(context);
+        stmtCtx.blocks = blocks;
+        stmt = &Statement::bind(*stmtSyntax, context, stmtCtx);
+        if (stmt->bad())
+            stmtCtx.blocks = {};
+    }
+    return *stmt;
+}
+
+void AnalogBlockSymbol::serializeTo(ASTSerializer& serializer) const {
+    serializer.write("isInitial", isInitial);
+    serializer.write("body", getBody());
+}
+
+Expression& BranchAccessExpression::fromSyntax(Compilation& comp, std::string_view name,
+                                               std::optional<Access> generic,
+                                               const InvocationExpressionSyntax& invocation,
+                                               const ASTContext& context) {
+    auto range = invocation.sourceRange();
+    auto bad = [&]() -> Expression& { return badExpr(comp, nullptr); };
+
+    // 4.4: a branch identifier, or one or two net expressions.
+    SmallVector<const ExpressionSyntax*, 2> args;
+    if (invocation.arguments) {
+        for (auto param : invocation.arguments->parameters) {
+            if (param->kind != SyntaxKind::OrderedArgument) {
+                context.addDiag(diag::AccessFunctionArgs, param->sourceRange());
+                return bad();
+            }
+            auto expr = context.requireSimpleExpr(*param->as<OrderedArgumentSyntax>().expr);
+            if (!expr)
+                return bad();
+            args.push_back(expr);
+        }
+    }
+    if (args.empty() || args.size() > 2) {
+        context.addDiag(diag::AccessFunctionArgs, range);
+        return bad();
+    }
+
+    const BranchSymbol* branch = nullptr;
+    if (args.size() == 1 && args[0]->kind == SyntaxKind::IdentifierName) {
+        auto argName = args[0]->as<IdentifierNameSyntax>().identifier.valueText();
+        auto sym = Lookup::unqualifiedAt(*context.scope, argName, context.getLocation(),
+                                         args[0]->sourceRange());
+        if (sym && sym->kind == SymbolKind::Branch)
+            branch = &sym->as<BranchSymbol>();
+    }
+
+    AnalogTerminal positive;
+    std::optional<AnalogTerminal> negative;
+    const DisciplineSymbol* discipline = nullptr;
+    if (branch) {
+        discipline = branch->getDiscipline();
+        if (!discipline)
+            return bad();
+        positive = branch->getPositive();
+        if (auto n = branch->getNegative())
+            negative = *n;
+    }
+    else {
+        positive = AnalogTerminal::bind(*args[0], context);
+        if (!positive.net)
+            return bad();
+        discipline = positive.net->discipline;
+
+        if (args.size() == 2) {
+            negative = AnalogTerminal::bind(*args[1], context);
+            if (!negative->net)
+                return bad();
+            if (positive.sameAs(*negative)) {
+                context.addDiag(diag::BranchSameTerminal, args[1]->sourceRange());
+                return bad();
+            }
+            auto nd = negative->net->discipline;
+            if (!discipline->isCompatibleWith(*nd)) {
+                context.addDiag(diag::BranchDisciplineMismatch, args[1]->sourceRange())
+                    << discipline->name << nd->name;
+                return bad();
+            }
+            if (discipline->isNatureless())
+                discipline = nd;
+        }
+    }
+
+    // The access function name comes from the discipline's natures (4.4), never hard-coded.
+    Access access = Access::Potential;
+    const NatureSymbol* nature = nullptr;
+    if (generic) {
+        access = *generic;
+        nature = access == Access::Potential ? discipline->getPotential() : discipline->getFlow();
+    }
+    else if (auto p = discipline->getPotential(); p && p->getAccessName() == name) {
+        nature = p;
+    }
+    else if (auto f = discipline->getFlow(); f && f->getAccessName() == name) {
+        access = Access::Flow;
+        nature = f;
+    }
+
+    if (!nature) {
+        std::string_view shown = name;
+        if (generic)
+            shown = *generic == Access::Potential ? "potential"sv : "flow"sv;
+        context.addDiag(diag::AccessFunctionMismatch, range) << shown << discipline->name;
+        return bad();
+    }
+
+    return *comp.emplace<BranchAccessExpression>(comp.getRealType(), access, *nature, *discipline,
+                                                 branch, positive, negative, name, range);
+}
+
+ConstantValue BranchAccessExpression::evalImpl(EvalContext& context) const {
+    context.addDiag(diag::ConstEvalNonConstVariable, sourceRange)
+        << (accessName.empty() ? (access == Access::Potential ? "potential"sv : "flow"sv)
+                               : accessName);
+    return nullptr;
+}
+
+bool BranchAccessExpression::isEquivalentImpl(const BranchAccessExpression& rhs) const {
+    auto sameTerminal = [](const AnalogTerminal& a, const AnalogTerminal& b) {
+        return a.net == b.net && a.index == b.index;
+    };
+    if (access != rhs.access || nature != rhs.nature || branch != rhs.branch)
+        return false;
+    if (!sameTerminal(positive, rhs.positive) || negative.has_value() != rhs.negative.has_value())
+        return false;
+    return !negative || sameTerminal(*negative, *rhs.negative);
+}
+
+void BranchAccessExpression::serializeTo(ASTSerializer& serializer) const {
+    serializer.write("access", access == Access::Potential ? "potential"sv : "flow"sv);
+    serializer.writeLink("nature", *nature);
+    serializer.writeLink("discipline", *discipline);
+    if (branch)
+        serializer.writeLink("branch", *branch);
+    if (positive.expr)
+        serializer.write("positive", *positive.expr);
+    if (negative && negative->expr)
+        serializer.write("negative", *negative->expr);
+}
+
+Statement& ContributionStatement::fromSyntax(Compilation& comp,
+                                             const ContributionStatementSyntax& syntax,
+                                             const ASTContext& context) {
+    auto& lhs = Expression::bind(*syntax.lhs, context);
+    auto& rhs = Expression::bindRValue(comp.getRealType(), *syntax.rhs, syntax.op.range(),
+                                       context);
+    auto result = comp.emplace<ContributionStatement>(lhs, rhs, syntax.sourceRange());
+    if (lhs.bad() || rhs.bad())
+        return badStmt(comp, result);
+
+    // 5.6: the target is a branch access function call (branch_lvalue).
+    if (lhs.kind != ExpressionKind::BranchAccess) {
+        context.addDiag(diag::ContributionTargetNotBranch, lhs.sourceRange);
+        return badStmt(comp, result);
+    }
+
+    if (!context.flags.has(ASTFlags::AnalogBlock)) {
+        context.addDiag(diag::ContributionOutsideAnalog, syntax.op.range());
+        return badStmt(comp, result);
+    }
+
+    // analog initial takes an analog_function_statement, which has no contributions.
+    if (context.flags.has(ASTFlags::AnalogInitial)) {
+        context.addDiag(diag::ContributionInAnalogInitial, syntax.op.range());
+        return badStmt(comp, result);
+    }
+
+    return *result;
+}
+
+Statement::EvalResult ContributionStatement::evalImpl(EvalContext& context) const {
+    context.addDiag(diag::ConstEvalTimedStmtNotConst, sourceRange);
+    return EvalResult::Fail;
+}
+
+void ContributionStatement::serializeTo(ASTSerializer& serializer) const {
+    serializer.write("lhs", lhs);
+    serializer.write("rhs", rhs);
+}
+
+} // namespace slang::ast

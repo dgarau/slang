@@ -1337,6 +1337,16 @@ error BranchTerminalNotNet "a branch terminal must be a net"
 error BranchTerminalNoDiscipline "net '{}' has no continuous discipline"
 error BranchDisciplineMismatch "disciplines '{}' and '{}' are not compatible"
 error BranchSameTerminal "both terminals refer to the same net"
+error ContributionOperatorInExpression "'<+' is the Verilog-AMS contribution operator; write '< +' for a less-than comparison with a unary plus"
+error ContributionTargetNotBranch "the target of a contribution must be a branch access function such as V(a, b) or I(br)"
+error ContributionOutsideAnalog "contribution statements are only allowed in an analog block"
+error ContributionInAnalogInitial "contribution statements are not allowed in an analog initial block"
+error AccessFunctionArgs "an access function takes a branch, or one or two nets"
+error AccessFunctionMismatch "'{}' is not an access function of discipline '{}'"
+error AnalogOperatorOutsideAnalog "the analog operator '{}' is only allowed in an analog block"
+error AnalysisArgNotString "the arguments of analysis() must be string literals"
+error NotAllowedInAnalog "{} is not allowed in an analog block"
+error ScaledDelay "a scale factor is not allowed in a digital delay"
 
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.

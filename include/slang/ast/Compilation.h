@@ -534,6 +534,11 @@ public:
     std::span<const NatureSymbol* const> getNatures() const { return natureList; }
     std::span<const DisciplineSymbol* const> getDisciplines() const { return disciplineList; }
 
+    /// SVMake VAMS P0.1: the Verilog-AMS builtin named by keyword @a kind (sin, ddt, ...), or the
+    /// VAMS-only system function @a name ($abstime); null if there is none.
+    const SystemSubroutine* getAnalogBuiltin(parsing::TokenKind kind) const;
+    const SystemSubroutine* getVamsSystemFunction(std::string_view name) const;
+
     /// SVMake VAMS P0.1: true if some nature names @a name as its access function.
     bool isAccessName(std::string_view name) const;
 

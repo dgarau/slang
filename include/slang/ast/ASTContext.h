@@ -199,8 +199,18 @@ enum class SLANG_EXPORT ASTFlags : uint64_t {
     /// The type being resolved is the type of an enum's values, which is the
     /// enum type itself without any packed dimensions given in its syntax.
     EnumValueType = 1ull << 45,
+
+    /// SVMake VAMS P0.1: binding inside a Verilog-AMS analog block (or analog initial).
+    AnalogBlock = 1ull << 46,
+
+    /// SVMake VAMS P0.1: binding inside an analog initial block.
+    AnalogInitial = 1ull << 47,
+
+    /// SVMake VAMS P0.1: binding the statement of an analog event control (contributions
+    /// are not allowed there, VAMS-2023 5.10).
+    AnalogEvent = 1ull << 48,
 };
-SLANG_BITMASK(ASTFlags, EnumValueType)
+SLANG_BITMASK(ASTFlags, AnalogEvent)
 
 /// Various flags that can be applied to a constant expression evaluation.
 enum class SLANG_EXPORT EvalFlags : uint8_t {

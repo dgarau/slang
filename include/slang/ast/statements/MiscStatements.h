@@ -394,6 +394,34 @@ public:
 };
 
 /// Represents a procedural `deassign` statement.
+/// SVMake VAMS P0.1: a Verilog-AMS contribution statement (VAMS-2023 5.6):
+/// `branch_lvalue <+ analog_expression ;`. The target is a BranchAccessExpression and
+/// the value is converted to real.
+class SLANG_EXPORT ContributionStatement final : public Statement {
+public:
+    const Expression& lhs;
+    const Expression& rhs;
+
+    ContributionStatement(const Expression& lhs, const Expression& rhs, SourceRange sourceRange) :
+        Statement(StatementKind::Contribution, sourceRange), lhs(lhs), rhs(rhs) {}
+
+    EvalResult evalImpl(EvalContext& context) const;
+
+    static Statement& fromSyntax(Compilation& compilation,
+                                 const syntax::ContributionStatementSyntax& syntax,
+                                 const ASTContext& context);
+
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static bool isKind(StatementKind kind) { return kind == StatementKind::Contribution; }
+
+    template<typename TVisitor>
+    decltype(auto) visitExprs(TVisitor&& visitor) const {
+        lhs.visit(visitor);
+        rhs.visit(visitor);
+    }
+};
+
 class SLANG_EXPORT ProceduralDeassignStatement final : public Statement {
 public:
     /// The target lvalue to deassign.

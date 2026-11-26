@@ -420,6 +420,7 @@ private:
     syntax::DisciplineDeclarationSyntax& parseDisciplineDeclaration(AttrList attributes);
     syntax::GroundDeclarationSyntax& parseGroundDeclaration(AttrList attributes);
     syntax::BranchDeclarationSyntax& parseBranchDeclaration(AttrList attributes);
+    syntax::AnalogBlockSyntax& parseAnalogBlock(AttrList attributes);
 
     template<bool (*IsEnd)(TokenKind)>
     syntax::SeparatedSyntaxList<syntax::DeclaratorSyntax> parseDeclarators(

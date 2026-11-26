@@ -184,3 +184,19 @@ BranchDeclarationSyntax& Parser::parseBranchDeclaration(AttrList attributes) {
 }
 
 } // namespace slang::parsing
+
+namespace slang::parsing {
+
+using namespace syntax;
+
+// analog_construct ::= analog analog_statement | analog initial analog_function_statement
+AnalogBlockSyntax& Parser::parseAnalogBlock(AttrList attributes) {
+    auto keyword = consume();
+    Token initial;
+    if (peek(TokenKind::InitialKeyword))
+        initial = consume();
+    auto& statement = parseStatement();
+    return factory.analogBlock(attributes, keyword, initial, statement);
+}
+
+} // namespace slang::parsing

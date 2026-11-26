@@ -1204,6 +1204,18 @@ const DisciplineSymbol* Compilation::getDiscipline(std::string_view name) const 
     return it == disciplineMap.end() ? nullptr : it->second;
 }
 
+const SystemSubroutine* Compilation::getAnalogBuiltin(parsing::TokenKind kind) const {
+    auto& map = builtins::Builtins::Instance.analogBuiltins;
+    auto it = map.find(kind);
+    return it == map.end() ? nullptr : it->second.get();
+}
+
+const SystemSubroutine* Compilation::getVamsSystemFunction(std::string_view name) const {
+    auto& map = builtins::Builtins::Instance.vamsSystemFunctions;
+    auto it = map.find(name);
+    return it == map.end() ? nullptr : it->second.get();
+}
+
 bool Compilation::isAccessName(std::string_view name) const {
     for (auto nature : natureList) {
         if (nature->getAccessName() == name)

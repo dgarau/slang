@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "slang/diagnostics/ParserDiags.h"
+#include "slang/diagnostics/VamsDiags.h"
 #include "slang/parsing/Lexer.h"
 #include "slang/parsing/Parser.h"
 #include "slang/parsing/Preprocessor.h"
@@ -142,6 +143,22 @@ ExpressionSyntax& Parser::parseBinaryExpression(ExpressionSyntax* left,
         // either a binary operator, or we're done
         current = peek();
         auto opKind = getBinaryExpression(current.kind);
+        if (current.kind == TokenKind::LessThanPlus) {
+            // SVMake VAMS P0.1: at the top of an expression statement `<+` is a contribution,
+            // which the statement parser handles. Anywhere else it is legal 1364 `a < +b`
+            // lexed as the VAMS token: report it once and recover as that comparison.
+            if (options.has(ExpressionOptions::ProceduralAssignmentContext))
+                break;
+            if (precedence > getPrecedence(SyntaxKind::LessThanExpression))
+                break;
+            addDiag(diag::ContributionOperatorInExpression, current.range());
+            auto op = consume();
+            auto& rhs = parseSubExpression(options & ~(ExpressionOptions::ProceduralAssignmentContext |
+                                                       ExpressionOptions::AssignmentStatementContext),
+                                           getPrecedence(SyntaxKind::LessThanExpression) + 1);
+            left = &factory.binaryExpression(SyntaxKind::LessThanExpression, *left, op, {}, rhs);
+            continue;
+        }
         if (opKind == SyntaxKind::Unknown) {
             break;
         }
@@ -330,7 +347,18 @@ ExpressionSyntax& Parser::parsePrimaryExpression(bitmask<ExpressionOptions> opti
         }
         case TokenKind::SystemIdentifier:
             return factory.systemName(consume());
+        case TokenKind::CrossKeyword:
+            // SVMake VAMS P0.1: cross() is an analog event function in Verilog-AMS source only;
+            // in SystemVerilog it is the covergroup keyword and stays an error here.
+            if (getPP().isVamsSource())
+                return factory.systemName(consume());
+            [[fallthrough]];
         default:
+            // SVMake VAMS P0.1: keyword-named analog builtins (only lexed in VAMS source)
+            // are system names, bound through the compilation's analog builtin registry.
+            if (isAnalogBuiltinKeyword(kind))
+                return factory.systemName(consume());
+
             // possibilities here:
             // 1. data type
             // 2. qualified name

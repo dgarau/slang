@@ -193,6 +193,11 @@ protected:
     void visitStmt(const InvalidStatement&) { bad = true; }
 
     void visitStmt(const ExpressionStatement& stmt) { visit(stmt.expr); }
+    // SVMake VAMS P0.1
+    void visitStmt(const ContributionStatement& stmt) {
+        visit(stmt.lhs);
+        visit(stmt.rhs);
+    }
     void visitStmt(const TimedStatement& stmt) { visit(stmt.stmt); }
     void visitStmt(const EventTriggerStatement& stmt) { visit(stmt.target); }
     void visitStmt(const ProceduralAssignStatement& stmt) { visit(stmt.assignment); }
@@ -1037,7 +1042,8 @@ protected:
                          SimpleAssignmentPatternExpression, StructuredAssignmentPatternExpression,
                          ReplicatedAssignmentPatternExpression, ValueRangeExpression,
                          DistExpression, NewArrayExpression, NewClassExpression,
-                         NewCovergroupExpression, CopyClassExpression, TaggedUnionExpression>)
+                         NewCovergroupExpression, CopyClassExpression, TaggedUnionExpression,
+                         BranchAccessExpression>) // SVMake VAMS P0.1
     void visitExpr(const T& expr) {
         expr.visitExprs(DERIVED);
     }

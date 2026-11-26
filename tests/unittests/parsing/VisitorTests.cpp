@@ -1403,6 +1403,8 @@ static constexpr auto IgnoredSyntaxKinds = {
     SyntaxKind::DisciplineAttributeOverride,
     SyntaxKind::GroundDeclaration,
     SyntaxKind::BranchDeclaration,
+    SyntaxKind::AnalogBlock,
+    SyntaxKind::ContributionStatement,
     SyntaxKind::Unknown,
     SyntaxKind::BadExpression,
     SyntaxKind::CellDefineDirective,
@@ -1464,7 +1466,7 @@ static constexpr auto IgnoredSymbolKinds = {SymbolKind::Unknown,     SymbolKind:
                                             SymbolKind::UntypedType, SymbolKind::LocalAssertionVar,
                                             // SVMake VAMS P0.1 (see IgnoredSyntaxKinds)
                                             SymbolKind::Nature,      SymbolKind::Discipline,
-                                            SymbolKind::Branch};
+                                            SymbolKind::Branch,      SymbolKind::AnalogBlock};
 
 TEST_CASE("Visit all file") {
     // Load a file containing all the SystemVerilog constructs and visit them
@@ -1483,8 +1485,10 @@ TEST_CASE("Visit all file") {
     }
 
     flat_hash_set<SymbolKind> symKinds = IgnoredSymbolKinds;
-    flat_hash_set<ExpressionKind> exprKinds = {ExpressionKind::Invalid};
-    flat_hash_set<StatementKind> stmtKinds = {StatementKind::Invalid};
+    flat_hash_set<ExpressionKind> exprKinds = {ExpressionKind::Invalid,
+                                               ExpressionKind::BranchAccess}; // SVMake VAMS
+    flat_hash_set<StatementKind> stmtKinds = {StatementKind::Invalid,
+                                              StatementKind::Contribution}; // SVMake VAMS
     flat_hash_set<AssertionExprKind> assertionExprKinds = {AssertionExprKind::Invalid};
     flat_hash_set<TimingControlKind> timingControlKinds = {TimingControlKind::Invalid};
     flat_hash_set<ConstraintKind> constraintKinds = {ConstraintKind::Invalid};

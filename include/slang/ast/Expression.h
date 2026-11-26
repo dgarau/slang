@@ -66,7 +66,8 @@ enum class VariableFlags : uint16_t;
     x(MinTypMax) \
     x(ClockingEvent) \
     x(AssertionInstance) \
-    x(TaggedUnion)
+    x(TaggedUnion) \
+    x(BranchAccess)
 SLANG_ENUM(ExpressionKind, EXPRESSION)
 #undef EXPRESSION
 

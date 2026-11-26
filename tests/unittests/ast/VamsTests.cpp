@@ -423,3 +423,270 @@ module m_@@; electrical a; endmodule
     }
 }
 
+
+TEST_CASE("VAMS analog blocks and contributions") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m(p, n);
+    inout p, n;
+    electrical p, n, x;
+    branch (p, n) br;
+    parameter real r = 1k;
+    real v;
+    analog begin
+        v = V(p, n);
+        I(p, n) <+ v / r;
+        I(br) <+ potential(p, n) * 1u;
+        V(x) <+ flow(br);
+        if (v > 0.5) I(x) <+ 0.0;
+    end
+    analog initial begin
+        v = 0;
+    end
+    analog I(x, n) <+ ddt(V(x, n)) + idt(V(x), 0) + transition(v, 0, 1n, 1n) + limexp(v);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    std::vector<const AnalogBlockSymbol*> blocks;
+    for (auto& member : body.members()) {
+        if (member.kind == SymbolKind::AnalogBlock)
+            blocks.push_back(&member.as<AnalogBlockSymbol>());
+    }
+    REQUIRE(blocks.size() == 3);
+    CHECK(!blocks[0]->isInitial);
+    CHECK(blocks[1]->isInitial);
+
+    // Walk the first block: four contributions, each to a branch access.
+    struct {
+        int contributions = 0, potential = 0, flow = 0, named = 0;
+    } counter;
+    blocks[0]->getBody().visit(makeVisitor(
+        [&](auto& v, const ContributionStatement& stmt) {
+            counter.contributions++;
+            v.visitDefault(stmt);
+        },
+        [&](auto& v, const BranchAccessExpression& expr) {
+            if (expr.access == BranchAccessExpression::Access::Potential)
+                counter.potential++;
+            else
+                counter.flow++;
+            if (expr.branch)
+                counter.named++;
+            v.visitDefault(expr);
+        }));
+    CHECK(counter.contributions == 4);
+    CHECK(counter.potential == 3);
+    CHECK(counter.flow == 4);
+    CHECK(counter.named == 2);
+}
+
+TEST_CASE("VAMS access functions follow the discipline's natures") {
+    auto tree = vamsTree(R"(
+nature Vx units = "V"; access = Vx; abstol = 1u; endnature
+nature Ix units = "A"; access = Ix; abstol = 1p; endnature
+nature Va units = "V"; access = V; abstol = 1u; endnature
+nature Ia units = "A"; access = I; abstol = 1p; endnature
+discipline ex potential Vx; flow Ix; enddiscipline
+discipline ea potential Va; flow Ia; enddiscipline
+discipline \logic ; domain discrete; enddiscipline
+module m;
+    ex a, b;
+    ea c;
+    \logic d;
+    real r;
+    analog begin
+        r = Vx(a, b) + Ix(a);
+        r = V(a);
+        r = V(c) + I(c);
+        r = V(d);
+        r = Vx(c);
+    end
+endmodule
+module user;
+    function real V(input real q); return q; endfunction
+    ea c;
+    real r;
+    analog r = V(1.5);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    std::vector<std::pair<DiagCode, size_t>> got;
+    for (auto& d : compilation.getAllDiagnostics())
+        got.push_back({d.code, compilation.getSourceManager()->getLineNumber(d.location)});
+    // Lines: 17 r = V(a) (ex has Vx/Ix), 19 r = V(d) (discrete), 20 r = Vx(c) (ea has V/I).
+    CHECK(got == std::vector<std::pair<DiagCode, size_t>>{{diag::AccessFunctionMismatch, 17},
+                                                         {diag::BranchTerminalNoDiscipline, 19},
+                                                         {diag::AccessFunctionMismatch, 20}});
+}
+
+TEST_CASE("VAMS builtin keywords start statements") {
+    // V-M2: potential/flow and the other builtin keywords are possible expression starts.
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a, b;
+    branch (a, b) br;
+    analog begin
+        potential(a) <+ 1.0;
+        flow(br) <+ 0.0;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("VAMS contribution errors") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real x;
+    analog begin
+        x <+ 1.0;
+        if (x<+2) x = 1;
+    end
+    analog initial V(a) <+ 1.0;
+    always @(x) V(a) <+ 1.0;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    CHECK(c == std::vector<DiagCode>{diag::ContributionTargetNotBranch,
+                                     diag::ContributionOperatorInExpression,
+                                     diag::ContributionInAnalogInitial,
+                                     diag::ContributionOutsideAnalog});
+}
+
+TEST_CASE("VAMS math builtins evaluate in constant expressions") {
+    auto tree = vamsTree(R"(
+module m;
+    parameter real a = log(100);
+    parameter real b = ln(exp(1.0));
+    parameter real c = sqrt(16) + pow(2, 10) + hypot(3, 4) + atan2(0, 1);
+    parameter real d = sin(0) + cos(0) + floor(2.5) + ceil(2.5);
+    parameter integer e = abs(-3) + min(4, 7) + max(4, 7);
+    parameter real f = abs(-2.5) + min(1.5, 2) + ln1p(0) + expm1(0);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+    auto& root = compilation.getRoot();
+    auto val = [&](std::string_view p) { return root.lookupName<ParameterSymbol>(p).getValue(); };
+    CHECK(val("m.a").real() == 2.0);
+    CHECK(val("m.b").real() == 1.0);
+    CHECK(val("m.c").real() == 4.0 + 1024.0 + 5.0 + 0.0);
+    CHECK(val("m.d").real() == 0.0 + 1.0 + 2.0 + 3.0);
+    CHECK(val("m.e").integer() == 3 + 4 + 7);
+    CHECK(val("m.f").real() == 2.5 + 1.5);
+
+    auto bad = vamsTree("module n; parameter real p = sin(1, 2); endmodule\n");
+    Compilation c2;
+    c2.addSyntaxTree(bad);
+    CHECK(codes(c2) == std::vector<DiagCode>{diag::TooManyArguments});
+}
+
+TEST_CASE("VAMS analog operators are analog-only") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real x;
+    parameter real p = ddt(1.0);
+    always @(x) x = idt(x);
+    analog initial x = transition(x);
+    analog x = analysis(x);
+    analog x = laplace_nd(x, {1}, {1});
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
+    CHECK(count(diag::AnalogOperatorOutsideAnalog) == 3);
+    CHECK(count(diag::AnalysisArgNotString) == 1);
+    CHECK(count(diag::VamsNotSupported) == 1);
+}
+
+TEST_CASE("VAMS $abstime and analysis()") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real t;
+    integer k;
+    always @(t) t = $abstime;
+    analog begin
+        t = $abstime;
+        k = analysis("tran", "ac");
+        V(a) <+ t;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto sv = SyntaxTree::fromText("module s; real t; initial t = $abstime; endmodule\n");
+    Compilation c2;
+    c2.addSyntaxTree(sv);
+    CHECK(codes(c2) == std::vector<DiagCode>{diag::UnknownSystemName});
+}
+
+TEST_CASE("VAMS digital-only statements in analog blocks") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real x;
+    event e;
+    analog begin
+        #1 x = 1;
+        wait (x > 0) x = 2;
+        fork x = 3; join
+        x <= 4;
+    end
+    initial #5u x = 1;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
+    CHECK(count(diag::NotAllowedInAnalog) == 4);
+    CHECK(count(diag::ScaledDelay) == 1);
+}
+
+TEST_CASE("VAMS builtins as arguments and keyword builtins from SV macros") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+`define SINE sin(1.0)
+module m;
+    electrical a;
+    real x;
+    function real f(input real p, input real q); return p + q; endfunction
+    analog begin
+        $display(ddt(x), sin(x));
+        x = f(1, sin(x)) + f(abs(x), 2);
+        x = `SINE;
+    end
+endmodule
+`end_keywords
+module s;
+    real y;
+    initial y = `SINE;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    CHECK(codes(compilation) == std::vector<DiagCode>{diag::UnknownSystemName});
+}
+

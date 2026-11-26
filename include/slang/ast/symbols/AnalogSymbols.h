@@ -20,6 +20,8 @@ class ASTSerializer;
 class Expression;
 class NetSymbol;
 class Scope;
+class Statement;
+class StatementBlockSymbol;
 
 /// True if @a scope belongs to a definition parsed as Verilog-AMS source text
 /// (DefinitionSymbol::isVams). Compilation-unit scopes are never VAMS scopes.
@@ -172,6 +174,35 @@ private:
     mutable AnalogTerminal positive;
     mutable std::optional<AnalogTerminal> negative;
     mutable const DisciplineSymbol* discipline = nullptr;
+};
+
+/// A Verilog-AMS analog block (VAMS-2023 5.2): `analog <statement>` or
+/// `analog initial <statement>`. A SymbolKind of its own, so consumers that handle
+/// procedural blocks do not treat analog code as digital code by default.
+class SLANG_EXPORT AnalogBlockSymbol final : public Symbol {
+public:
+    bool isInitial;
+
+    AnalogBlockSymbol(SourceLocation loc, bool isInitial) :
+        Symbol(SymbolKind::AnalogBlock, "", loc), isInitial(isInitial) {}
+
+    const Statement& getBody() const;
+    std::span<const StatementBlockSymbol* const> getBlocks() const { return blocks; }
+
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static AnalogBlockSymbol& fromSyntax(Scope& scope, const syntax::AnalogBlockSyntax& syntax);
+
+    static bool isKind(SymbolKind kind) { return kind == SymbolKind::AnalogBlock; }
+
+    template<typename TVisitor>
+    decltype(auto) visitStmts(TVisitor&& visitor) const;
+
+private:
+    const syntax::StatementSyntax* stmtSyntax = nullptr;
+    std::span<const StatementBlockSymbol* const> blocks;
+    mutable const Statement* stmt = nullptr;
+    mutable bool isConstructing = false;
 };
 
 } // namespace slang::ast

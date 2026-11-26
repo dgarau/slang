@@ -142,6 +142,11 @@ public:
     /// @return true if the given token represents a possible expression or a comma.
     static bool isPossibleExpressionOrComma(TokenKind kind);
 
+    /// SVMake VAMS P0.1: a Verilog-AMS keyword that names a built-in function, analog operator,
+    /// analog event or generic access function (`potential`, `flow`). Such keywords only exist
+    /// in VAMS source; `cross` (an SV keyword) is not included.
+    static bool isAnalogBuiltinKeyword(TokenKind kind);
+
     /// @return true if the given token represents a possible expression, comma, or "default"
     /// keyword.
     static bool isPossibleExpressionOrCommaOrDefault(TokenKind kind);

@@ -54,7 +54,8 @@ enum class StatementBlockKind : int;
     x(ProceduralDeassign) \
     x(RandCase) \
     x(RandSequence) \
-    x(ProceduralChecker)
+    x(ProceduralChecker) \
+    x(Contribution)
 SLANG_ENUM(StatementKind, STATEMENT)
 #undef STATEMENT
 // clang-format on

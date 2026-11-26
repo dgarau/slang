@@ -159,6 +159,16 @@ StatementSyntax& Parser::parseStatement(bool allowEmpty, bool allowSuperNew) {
             options |= ExpressionOptions::AllowSuperNewCall;
 
         auto& expr = parseSubExpression(options, 0);
+
+        // SVMake VAMS P0.1: contribution_statement ::= branch_lvalue <+ analog_expression ;
+        // The token only exists in Verilog-AMS source.
+        if (peek(TokenKind::LessThanPlus)) {
+            auto op = consume();
+            auto& rhs = parseExpression();
+            return factory.contributionStatement(label, attributes, expr, op, rhs,
+                                                 expect(TokenKind::Semicolon));
+        }
+
         return factory.expressionStatement(label, attributes, expr, expect(TokenKind::Semicolon));
     }
 

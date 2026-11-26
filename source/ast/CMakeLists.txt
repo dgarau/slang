@@ -5,7 +5,8 @@
 
 target_sources(
   slang_slang
-  PRIVATE builtins/ArrayMethods.cpp
+  PRIVATE builtins/AnalogFuncs.cpp
+          builtins/ArrayMethods.cpp
           builtins/ConversionFuncs.cpp
           builtins/CoverageFuncs.cpp
           builtins/EnumMethods.cpp

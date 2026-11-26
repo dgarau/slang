@@ -404,7 +404,7 @@ struct AnalysisScopeVisitor {
                          PulseStyleSymbol, SystemTimingCheckSymbol, NetAliasSymbol,
                          ConfigBlockSymbol, CheckerInstanceBodySymbol,
                          // SVMake VAMS P0.1: analysed by the svmake analog front end (P0.2).
-                         NatureSymbol, DisciplineSymbol, BranchSymbol> ||
+                         NatureSymbol, DisciplineSymbol, BranchSymbol, AnalogBlockSymbol> ||
                  std::is_base_of_v<Type, T>)
     void visit(const T& symbol) {
         // Everything else doesn't need to be analyzed (except visiting expressions, if necessary).

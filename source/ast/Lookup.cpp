@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: MIT
 //------------------------------------------------------------------------------
 #include "slang/ast/Lookup.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
 
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Scope.h"
@@ -1201,12 +1202,31 @@ void Lookup::name(const NameSyntax& syntax, const ASTContext& context, bitmask<L
             Token nameToken = syntax.as<SystemNameSyntax>().systemIdentifier;
             result.found = nullptr;
 
+            // SVMake VAMS P0.1: a keyword-named Verilog-AMS builtin (sin, ddt, cross, ...).
+            // Only VAMS source lexes those keywords; a macro carrying one into a SystemVerilog
+            // scope still finds nothing.
+            if (nameToken.kind != TokenKind::SystemIdentifier) {
+                if (isVamsScope(scope))
+                    result.systemSubroutine = scope.getCompilation().getAnalogBuiltin(nameToken.kind);
+                if (!result.systemSubroutine) {
+                    result.addDiag(scope, diag::UnknownSystemName, nameToken.range())
+                        << nameToken.valueText();
+                }
+                return;
+            }
+
             if (auto knownNameId = nameToken.systemName();
                 knownNameId != KnownSystemName::Unknown) {
                 result.systemSubroutine = scope.getCompilation().getSystemSubroutine(knownNameId);
             }
             else {
                 result.systemSubroutine = scope.getCompilation().getSystemSubroutine(
+                    nameToken.valueText());
+            }
+
+            // SVMake VAMS P0.1: VAMS-only system functions ($abstime) in VAMS source.
+            if (!result.systemSubroutine && isVamsScope(scope)) {
+                result.systemSubroutine = scope.getCompilation().getVamsSystemFunction(
                     nameToken.valueText());
             }
 

@@ -124,7 +124,8 @@ enum class RandMode;
     x(ConfigBlock) \
     x(Nature) \
     x(Discipline) \
-    x(Branch)
+    x(Branch) \
+    x(AnalogBlock)
 // clang-format on
 
 SLANG_ENUM(SymbolKind, SYMBOLKIND)

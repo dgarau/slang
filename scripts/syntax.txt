@@ -2443,3 +2443,14 @@ separated_list<Expression> terminals
 token closeParen
 separated_list<Declarator> declarators
 token semi
+
+AnalogBlock base=Member
+token keyword
+token initial
+Statement statement
+
+ContributionStatement base=Statement
+Expression lhs
+token op
+Expression rhs
+token semi

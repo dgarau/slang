@@ -294,6 +294,7 @@ decltype(auto) Symbol::visit(TVisitor&& visitor, Args&&... args) const {
         SYMBOL(Nature);
         SYMBOL(Discipline);
         SYMBOL(Branch);
+        SYMBOL(AnalogBlock);
         TYPE(PredefinedIntegerType);
         TYPE(ScalarType);
         TYPE(FloatingType);
@@ -367,6 +368,7 @@ decltype(auto) Statement::visit(TVisitor&& visitor, Args&&... args) const {
         CASE(RandCase, RandCaseStatement);
         CASE(RandSequence, RandSequenceStatement);
         CASE(ProceduralChecker, ProceduralCheckerStatement);
+        CASE(Contribution, ContributionStatement);
     }
 #undef CASE
     // clang-format on
@@ -444,6 +446,7 @@ decltype(auto) Expression::visitExpression(TExpression* expr, TVisitor&& visitor
         CASE(ClockingEvent, ClockingEventExpression);
         CASE(AssertionInstance, AssertionInstanceExpression);
         CASE(TaggedUnion, TaggedUnionExpression);
+        CASE(BranchAccess, BranchAccessExpression);
     }
 #undef CASE
     // clang-format on
@@ -490,6 +493,12 @@ void CheckerInstanceSymbol::visitExprs(TVisitor&& visitor) const {
         if (auto expr = conn.getOutputInitialExpr())
             expr->visit(visitor);
     }
+}
+
+// SVMake VAMS P0.1
+template<typename TVisitor>
+decltype(auto) AnalogBlockSymbol::visitStmts(TVisitor&& visitor) const {
+    return getBody().visit(visitor);
 }
 
 template<typename TVisitor>

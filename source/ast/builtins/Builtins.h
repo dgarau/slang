@@ -55,6 +55,11 @@ public:
     flat_hash_map<std::tuple<std::string_view, SymbolKind>, std::shared_ptr<SystemSubroutine>>
         methodMap;
 
+    // SVMake VAMS P0.1: Verilog-AMS builtins, keyed by keyword kind (sin, ddt, ...) or by
+    // name for the VAMS-only `$` functions ($abstime). Never reachable from SV source.
+    flat_hash_map<parsing::TokenKind, std::shared_ptr<SystemSubroutine>> analogBuiltins;
+    flat_hash_map<std::string_view, std::shared_ptr<SystemSubroutine>> vamsSystemFunctions;
+
     static Builtins Instance;
 
     Builtins() {
@@ -81,6 +86,7 @@ public:
         registerQueryFuncs();
         registerStringMethods();
         registerSystemTasks();
+        registerAnalogFuncs();
     }
 
 private:
@@ -96,6 +102,7 @@ private:
     void registerQueryFuncs();
     void registerStringMethods();
     void registerSystemTasks();
+    void registerAnalogFuncs();
 
     void addSystemSubroutine(std::shared_ptr<SystemSubroutine> subroutine) {
         SLANG_ASSERT(subroutine->knownNameId != KnownSystemName::Unknown);
