@@ -9,7 +9,7 @@
 // All other rights reserved
 //
 // VAMS-2023
-// svmake: one correction to the VAMS-2023 Annex D text: typographic quotes in the `define P_U0 line replaced by grave accents (2026-11-26)
+// svmake (2026-11-26): modified copy of the VAMS-2023 Annex D text: one correction (typographic quotes in the `define P_U0 line replaced by grave accents), this marker line, and layout whitespace from the PDF extraction
 //
 // Mathematical and physical constants
 `ifdef CONSTANTS_VAMS

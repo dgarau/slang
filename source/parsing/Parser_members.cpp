@@ -58,6 +58,10 @@ MemberSyntax& Parser::parseModule(AttrList attributes, SyntaxKind parentKind,
     auto& pp = getPP();
     pp.pushDesignElementStack();
 
+    // SVMake VAMS P0.1: track VAMS text and syntax anywhere in this design element.
+    const uint64_t vamsTokensBefore = pp.getVamsTokenCount();
+    const bool outerSawVams = std::exchange(sawVamsSyntax, false);
+
     auto& header = parseModuleHeader();
     auto endKind = getModuleEndKind(header.moduleKeyword.kind);
 
@@ -89,6 +93,14 @@ MemberSyntax& Parser::parseModule(AttrList attributes, SyntaxKind parentKind,
         endKind, endmodule, declKind, [this](SyntaxKind parentKind, bool& anyLocalModules) {
             return parseMember(parentKind, anyLocalModules);
         });
+
+    // SVMake VAMS P0.1: the definition is Verilog-AMS if its header began in VAMS source, if any
+    // token up to and including `endmodule` was lexed as VAMS source (an included .vams body, an
+    // in-module `begin_keywords), or if the parser built a VAMS-only node (from a macro, say).
+    // Read before anything peeks past `endmodule`.
+    if (sawVamsSyntax || pp.getVamsTokenCount() != vamsTokensBefore)
+        node.vamsSource = true;
+    sawVamsSyntax = outerSawVams || sawVamsSyntax;
 
     getPP().setExpectedEndKind(TokenKind::Unknown);
     currentDefinitionKind = savedDefinitionKind;

@@ -17,7 +17,7 @@ using namespace syntax;
 static bool isNatureAttributeName(TokenKind kind) {
     switch (kind) {
         case TokenKind::Identifier:
-        case TokenKind::AbstolKeyword:
+        case TokenKind::AbsTolKeyword:
         case TokenKind::AccessKeyword:
         case TokenKind::DdtNatureKeyword:
         case TokenKind::IdtNatureKeyword:
@@ -68,7 +68,7 @@ NatureDeclarationSyntax& Parser::parseNatureDeclaration(AttrList attributes) {
         semi = consume();
 
     SmallVector<NatureAttributeSyntax*> items;
-    while (!peek(TokenKind::EndnatureKeyword) && !peek(TokenKind::EndOfFile)) {
+    while (!peek(TokenKind::EndNatureKeyword) && !peek(TokenKind::EndOfFile)) {
         auto current = peek();
         if (auto attr = parseNatureAttribute())
             items.push_back(attr);
@@ -76,7 +76,7 @@ NatureDeclarationSyntax& Parser::parseNatureDeclaration(AttrList attributes) {
             skipToken({});
     }
 
-    auto end = expect(TokenKind::EndnatureKeyword);
+    auto end = expect(TokenKind::EndNatureKeyword);
     return factory.natureDeclaration(attributes, keyword, name, parent, semi, {alloc, items},
                                      end);
 }
@@ -93,7 +93,7 @@ DisciplineDeclarationSyntax& Parser::parseDisciplineDeclaration(AttrList attribu
         semi = consume();
 
     SmallVector<SyntaxNode*> items;
-    while (!peek(TokenKind::EnddisciplineKeyword) && !peek(TokenKind::EndOfFile)) {
+    while (!peek(TokenKind::EndDisciplineKeyword) && !peek(TokenKind::EndOfFile)) {
         auto current = peek();
         switch (peek().kind) {
             case TokenKind::PotentialKeyword:
@@ -133,7 +133,7 @@ DisciplineDeclarationSyntax& Parser::parseDisciplineDeclaration(AttrList attribu
             skipToken({});
     }
 
-    auto end = expect(TokenKind::EnddisciplineKeyword);
+    auto end = expect(TokenKind::EndDisciplineKeyword);
     return factory.disciplineDeclaration(attributes, keyword, name, semi,
                                          {alloc, items}, end);
 }
@@ -141,6 +141,7 @@ DisciplineDeclarationSyntax& Parser::parseDisciplineDeclaration(AttrList attribu
 // ground [ discipline_identifier ] [ range ] list_of_net_identifiers ;
 GroundDeclarationSyntax& Parser::parseGroundDeclaration(AttrList attributes) {
     auto keyword = consume();
+    sawVamsSyntax = true;
 
     Token discipline;
     if (peek(TokenKind::Identifier) &&
@@ -158,6 +159,7 @@ GroundDeclarationSyntax& Parser::parseGroundDeclaration(AttrList attributes) {
 // branch ( branch_terminal [ , branch_terminal ] ) list_of_branch_identifiers ;
 BranchDeclarationSyntax& Parser::parseBranchDeclaration(AttrList attributes) {
     auto keyword = consume();
+    sawVamsSyntax = true;
 
     // port_branch_declaration ::= branch ( < port_identifier > ) ... is P1.
     if (peek(TokenKind::OpenParenthesis) && peek(1).kind == TokenKind::LessThan) {
@@ -192,6 +194,7 @@ using namespace syntax;
 // analog_construct ::= analog analog_statement | analog initial analog_function_statement
 AnalogBlockSyntax& Parser::parseAnalogBlock(AttrList attributes) {
     auto keyword = consume();
+    sawVamsSyntax = true;
     Token initial;
     if (peek(TokenKind::InitialKeyword))
         initial = consume();

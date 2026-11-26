@@ -623,6 +623,8 @@ Token Preprocessor::nextRaw() {
         }
 
         SLANG_ASSERT(!lexerStack.empty());
+        if (currentVamsSource)
+            vamsTokenCount++;
         return lexerStack.back()->lex(keywordVersionStack.back().version, currentVamsSource);
     };
 

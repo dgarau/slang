@@ -422,6 +422,11 @@ private:
     syntax::BranchDeclarationSyntax& parseBranchDeclaration(AttrList attributes);
     syntax::AnalogBlockSyntax& parseAnalogBlock(AttrList attributes);
 
+    // SVMake VAMS P0.1: set when the parser builds a Verilog-AMS-only node (analog block,
+    // contribution, branch, ground, analog builtin); parseModule ORs it, and whether any token
+    // of the body was lexed as VAMS source, into the definition's VAMS bit.
+    bool sawVamsSyntax = false;
+
     template<bool (*IsEnd)(TokenKind)>
     syntax::SeparatedSyntaxList<syntax::DeclaratorSyntax> parseDeclarators(
         TokenKind endKind, Token& end, bitmask<DeclaratorOptions> options = {});

@@ -1604,6 +1604,10 @@ void Scope::handleDataDeclaration(
                           select->identifier.location()));
             }
 
+            // 3.13.3: a net can not be declared local to a block.
+            if (thisSym->kind == SymbolKind::StatementBlock)
+                addDiag(diag::NetDeclaredInBlock, syntax.sourceRange());
+
             insertionPoint->indexInScope -= (uint32_t)syntax.declarators.size();
             for (auto decl : syntax.declarators) {
                 auto net = createDisciplineNet(*discipline, *decl, *typeSyntax);

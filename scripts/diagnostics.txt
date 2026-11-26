@@ -1352,6 +1352,16 @@ error AnalogEventNotInEventControl "the analog event '{}' can only be used as an
 error AnalogEventInDigital "the analog event '{}' is only allowed in an analog block"
 error AnalogEventArgNotString "the arguments of '{}' must be string literals naming analyses"
 error CrossDirectionInvalid "the direction of cross() must be -1, 0 or +1"
+error NotAllowedInAnalogInitial "{} is not allowed in an analog initial block"
+error AnalogOperatorInEvent "the analog operator '{}' is not allowed in an event-triggered statement"
+error NestedAnalogEvent "an event control cannot be nested in the statement of an analog event control"
+error ContributionValueNotNumeric "the value of a contribution must be a numeric expression"
+error NatureCycle "nature '{}' is derived from itself"
+error NatureAbstolNotNumeric "the abstol attribute of a nature must be a numeric constant"
+error BranchTooManyTerminals "a branch has one or two terminals"
+error NetDeclaredInBlock "a net cannot be declared local to a block"
+note NoteBodiesDifferInMacro "the bodies differ in the expansion of macro '{}'"
+warning vams-name-conflict VamsNameConflict "{} '{}' has the same name as a {}; natures, disciplines and modules share the module-level scope (VAMS-2023 3.13.1)"
 
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.

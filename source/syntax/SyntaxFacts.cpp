@@ -758,12 +758,12 @@ bool SyntaxFacts::isAnalogBuiltinKeyword(TokenKind kind) {
         case TokenKind::DdtKeyword:
         case TokenKind::DdxKeyword:
         case TokenKind::IdtKeyword:
-        case TokenKind::IdtmodKeyword:
-        case TokenKind::AbsdelayKeyword:
+        case TokenKind::IdtModKeyword:
+        case TokenKind::AbsDelayKeyword:
         case TokenKind::TransitionKeyword:
         case TokenKind::SlewKeyword:
         case TokenKind::LastCrossingKeyword:
-        case TokenKind::LimexpKeyword:
+        case TokenKind::LimExpKeyword:
         case TokenKind::LaplaceNdKeyword:
         case TokenKind::LaplaceNpKeyword:
         case TokenKind::LaplaceZdKeyword:
@@ -782,7 +782,7 @@ bool SyntaxFacts::isAnalogBuiltinKeyword(TokenKind kind) {
         case TokenKind::FinalStepKeyword:
         case TokenKind::AboveKeyword:
         case TokenKind::TimerKeyword:
-        case TokenKind::AbsdeltaKeyword:
+        case TokenKind::AbsDeltaKeyword:
         case TokenKind::PotentialKeyword:
         case TokenKind::FlowKeyword:
             return true;

@@ -12,6 +12,7 @@
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
 #include "slang/ast/SystemSubroutine.h"
+#include "slang/ast/symbols/AnalogSymbols.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
@@ -178,6 +179,21 @@ void InvalidTimingControl::serializeTo(ASTSerializer& serializer) const {
         serializer.write("child", *child);
 }
 
+// SVMake VAMS P0.1: VAMS-2023 2.6.2, scale factors are not allowed in digital delays
+// (#5u, #(5u)). Only Verilog-AMS source lexes them: a real literal whose text ends in a
+// Table 2-1 letter.
+static void checkScaledDelay(const ExpressionSyntax& syntax, const ASTContext& context) {
+    const ExpressionSyntax* expr = &syntax;
+    while (expr->kind == SyntaxKind::ParenthesizedExpression)
+        expr = expr->as<ParenthesizedExpressionSyntax>().expression;
+    if (expr->kind != SyntaxKind::RealLiteralExpression || !isVamsScope(*context.scope))
+        return;
+
+    auto raw = expr->as<LiteralExpressionSyntax>().literal.rawText();
+    if (!raw.empty() && std::string_view("TGMKkmunpfa").find(raw.back()) != std::string_view::npos)
+        context.addDiag(diag::ScaledDelay, expr->sourceRange());
+}
+
 TimingControl& DelayControl::fromSyntax(Compilation& compilation, const DelaySyntax& syntax,
                                         const ASTContext& context) {
     auto& expr = Expression::bind(*syntax.delayValue, context);
@@ -185,13 +201,7 @@ TimingControl& DelayControl::fromSyntax(Compilation& compilation, const DelaySyn
     if (expr.bad())
         return badCtrl(compilation, result);
 
-    // SVMake VAMS P0.1: VAMS-2023 2.6.2, scale factors are not allowed in digital delays (#5u).
-    // Only Verilog-AMS source lexes them: a real literal whose text ends in the scale letter.
-    if (syntax.delayValue->kind == SyntaxKind::RealLiteralExpression) {
-        auto raw = syntax.delayValue->as<LiteralExpressionSyntax>().literal.rawText();
-        if (!raw.empty() && isAlphaNumeric(raw.back()) && !isDecimalDigit(raw.back()))
-            context.addDiag(diag::ScaledDelay, syntax.delayValue->sourceRange());
-    }
+    checkScaledDelay(*syntax.delayValue, context);
 
     if (!expr.type->isNumeric()) {
         context.addDiag(diag::DelayNotNumeric, expr.sourceRange) << *expr.type;
@@ -242,6 +252,12 @@ TimingControl& Delay3Control::fromSyntax(Compilation& compilation, const Delay3S
     const Expression* expr3 = nullptr;
     if (syntax.delay3)
         expr3 = &Expression::bind(*syntax.delay3, context);
+
+    checkScaledDelay(*syntax.delay1, context);
+    if (syntax.delay2)
+        checkScaledDelay(*syntax.delay2, context);
+    if (syntax.delay3)
+        checkScaledDelay(*syntax.delay3, context);
 
     auto result = compilation.emplace<Delay3Control>(expr1, expr2, expr3, syntax.sourceRange());
     if (expr1.bad() || (expr2 && expr2->bad()) || (expr3 && expr3->bad()))
@@ -404,6 +420,21 @@ TimingControl& SignalEventControl::fromExpr(Compilation& compilation, EdgeKind e
     auto result = compilation.emplace<SignalEventControl>(edge, expr, iffCondition, sourceRange);
     if (expr.bad())
         return badCtrl(compilation, result);
+
+    // SVMake VAMS P0.1: an event on an access function in digital code (`always @(V(a))`) is not
+    // a continuous event of 7.3.5; its semantics wait for the mixed-signal kernel (P0.4).
+    if (!context.flags.has(ASTFlags::AnalogBlock) && isVamsScope(*context.scope)) {
+        bool access = false;
+        expr.visit(makeVisitor([&](auto& v, const BranchAccessExpression& e) {
+            access = true;
+            v.visitDefault(e);
+        }));
+        if (access) {
+            context.addDiag(diag::VamsNotSupported, expr.sourceRange)
+                << "events on access functions in digital code"sv;
+            return badCtrl(compilation, result);
+        }
+    }
 
     // Note: `expr` here can be a void-typed ArbitrarySymbolExpression if it's
     // referring to a clocking block.

@@ -1144,15 +1144,21 @@ static void collectTokens(const SyntaxNode& node, SmallVectorBase<Token>& out) {
     }
 }
 
-static bool sameDeclarationTokens(const SyntaxNode& a, const SyntaxNode& b) {
+// Returns true if the two declarations have the same tokens; otherwise sets @a diffA / @a diffB
+// to the first differing tokens (an absent token stays empty).
+static bool sameDeclarationTokens(const SyntaxNode& a, const SyntaxNode& b, Token& diffA,
+                                  Token& diffB) {
     SmallVector<Token> ta, tb;
     collectTokens(a, ta);
     collectTokens(b, tb);
-    if (ta.size() != tb.size())
-        return false;
-    for (size_t i = 0; i < ta.size(); i++) {
-        if (ta[i].kind != tb[i].kind || ta[i].rawText() != tb[i].rawText())
+    for (size_t i = 0; i < std::max(ta.size(), tb.size()); i++) {
+        Token x = i < ta.size() ? ta[i] : Token();
+        Token y = i < tb.size() ? tb[i] : Token();
+        if (!x || !y || x.kind != y.kind || x.rawText() != y.rawText()) {
+            diffA = x;
+            diffB = y;
             return false;
+        }
     }
     return true;
 }
@@ -1169,12 +1175,25 @@ static void addVamsDeclaration(Compilation& comp, const TSyntax& syntax, const S
         // The same declaration read again (a standard include in two compilation units or two
         // libraries) is the same nature or discipline; a different body is an error.
         auto prev = it->second->getSyntax();
-        if (prev && sameDeclarationTokens(*prev, syntax))
+        Token diffPrev, diffThis;
+        if (prev && sameDeclarationTokens(*prev, syntax, diffPrev, diffThis))
             return;
 
+        // An error (decision CR-L6): natures are global, and two different bodies cannot both be
+        // the one nature. Name both sites, and the macro (an Annex D `*_ABSTOL` override, say)
+        // when the first difference comes from one.
         auto& diag = unit.addDiag(diag::NatureRedefinition, syntax.name.range());
         diag << what << name;
         diag.addNote(diag::NotePreviousDefinition, it->second->location);
+        if (auto sm = comp.getSourceManager()) {
+            for (auto tok : {diffThis, diffPrev}) {
+                if (tok && sm->isMacroLoc(tok.location())) {
+                    diag.addNote(diag::NoteBodiesDifferInMacro, tok.location())
+                        << sm->getMacroName(tok.location());
+                    break;
+                }
+            }
+        }
         return;
     }
 
@@ -1930,6 +1949,26 @@ void Compilation::elaborate() {
         nature->check();
     for (auto discipline : std::vector<const DisciplineSymbol*>(disciplineList))
         discipline->check();
+
+    // VAMS-2023 3.13.1: natures and disciplines are defined at the same level of scope as
+    // modules. The LRM states no rule for a clash, so it is a warning (decision CR-L7).
+    auto checkClash = [&](const Symbol& sym, std::string_view what) {
+        if (auto def = tryGetDefinition(sym.name, *root).definition) {
+            auto& d = sym.getParentScope()->addDiag(diag::VamsNameConflict, sym.location);
+            d << what << sym.name << "module"sv;
+            d.addNote(diag::NoteDeclarationHere, def->location);
+        }
+    };
+    for (auto nature : natureList) {
+        checkClash(*nature, "nature"sv);
+        if (auto disc = getDiscipline(nature->name)) {
+            auto& d = nature->getParentScope()->addDiag(diag::VamsNameConflict, nature->location);
+            d << "nature"sv << nature->name << "discipline"sv;
+            d.addNote(diag::NoteDeclarationHere, disc->location);
+        }
+    }
+    for (auto discipline : disciplineList)
+        checkClash(*discipline, "discipline"sv);
 
     if (!elabVisitor.finishedEarly())
         elabVisitor.finalize();

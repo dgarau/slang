@@ -344,13 +344,13 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
 #define NEWKEYWORDS_VAMS_2_3 \
     { "above", TokenKind::AboveKeyword },\
     { "abs", TokenKind::AbsKeyword },\
-    { "absdelay", TokenKind::AbsdelayKeyword },\
-    { "abstol", TokenKind::AbstolKeyword },\
+    { "absdelay", TokenKind::AbsDelayKeyword },\
+    { "abstol", TokenKind::AbsTolKeyword },\
     { "ac_stim", TokenKind::AcStimKeyword },\
     { "access", TokenKind::AccessKeyword },\
     { "acos", TokenKind::AcosKeyword },\
     { "acosh", TokenKind::AcoshKeyword },\
-    { "aliasparam", TokenKind::AliasparamKeyword },\
+    { "aliasparam", TokenKind::AliasParamKeyword },\
     { "analog", TokenKind::AnalogKeyword },\
     { "analysis", TokenKind::AnalysisKeyword },\
     { "asin", TokenKind::AsinKeyword },\
@@ -361,8 +361,8 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "branch", TokenKind::BranchKeyword },\
     { "ceil", TokenKind::CeilKeyword },\
     { "connect", TokenKind::ConnectKeyword },\
-    { "connectmodule", TokenKind::ConnectmoduleKeyword },\
-    { "connectrules", TokenKind::ConnectrulesKeyword },\
+    { "connectmodule", TokenKind::ConnectModuleKeyword },\
+    { "connectrules", TokenKind::ConnectRulesKeyword },\
     { "continuous", TokenKind::ContinuousKeyword },\
     { "cos", TokenKind::CosKeyword },\
     { "cosh", TokenKind::CoshKeyword },\
@@ -374,10 +374,10 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "discrete", TokenKind::DiscreteKeyword },\
     { "domain", TokenKind::DomainKeyword },\
     { "driver_update", TokenKind::DriverUpdateKeyword },\
-    { "endconnectrules", TokenKind::EndconnectrulesKeyword },\
-    { "enddiscipline", TokenKind::EnddisciplineKeyword },\
-    { "endnature", TokenKind::EndnatureKeyword },\
-    { "endparamset", TokenKind::EndparamsetKeyword },\
+    { "endconnectrules", TokenKind::EndConnectRulesKeyword },\
+    { "enddiscipline", TokenKind::EndDisciplineKeyword },\
+    { "endnature", TokenKind::EndNatureKeyword },\
+    { "endparamset", TokenKind::EndParamSetKeyword },\
     { "exclude", TokenKind::ExcludeKeyword },\
     { "exp", TokenKind::ExpKeyword },\
     { "final_step", TokenKind::FinalStepKeyword },\
@@ -389,7 +389,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "hypot", TokenKind::HypotKeyword },\
     { "idt", TokenKind::IdtKeyword },\
     { "idt_nature", TokenKind::IdtNatureKeyword },\
-    { "idtmod", TokenKind::IdtmodKeyword },\
+    { "idtmod", TokenKind::IdtModKeyword },\
     { "inf", TokenKind::InfKeyword },\
     { "initial_step", TokenKind::InitialStepKeyword },\
     { "laplace_nd", TokenKind::LaplaceNdKeyword },\
@@ -397,7 +397,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "laplace_zd", TokenKind::LaplaceZdKeyword },\
     { "laplace_zp", TokenKind::LaplaceZpKeyword },\
     { "last_crossing", TokenKind::LastCrossingKeyword },\
-    { "limexp", TokenKind::LimexpKeyword },\
+    { "limexp", TokenKind::LimExpKeyword },\
     { "ln", TokenKind::LnKeyword },\
     { "log", TokenKind::LogKeyword },\
     { "max", TokenKind::MaxKeyword },\
@@ -406,10 +406,10 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "nature", TokenKind::NatureKeyword },\
     { "noise_table", TokenKind::NoiseTableKeyword },\
     { "noise_table_log", TokenKind::NoiseTableLogKeyword },\
-    { "paramset", TokenKind::ParamsetKeyword },\
+    { "paramset", TokenKind::ParamSetKeyword },\
     { "potential", TokenKind::PotentialKeyword },\
     { "pow", TokenKind::PowKeyword },\
-    { "resolveto", TokenKind::ResolvetoKeyword },\
+    { "resolveto", TokenKind::ResolveToKeyword },\
     { "sin", TokenKind::SinKeyword },\
     { "sinh", TokenKind::SinhKeyword },\
     { "slew", TokenKind::SlewKeyword },\
@@ -429,7 +429,7 @@ const static flat_hash_map<std::string_view, KeywordVersion> keywordVersionTable
     { "zi_zp", TokenKind::ZiZpKeyword }
 
 #define NEWKEYWORDS_VAMS_2023_ONLY \
-    { "absdelta", TokenKind::AbsdeltaKeyword },\
+    { "absdelta", TokenKind::AbsDeltaKeyword },\
     { "break", TokenKind::BreakKeyword },\
     { "continue", TokenKind::ContinueKeyword },\
     { "expm1", TokenKind::Expm1Keyword },\
@@ -760,14 +760,14 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::XorKeyword:
         case TokenKind::AboveKeyword:
         case TokenKind::AbsKeyword:
-        case TokenKind::AbsdelayKeyword:
-        case TokenKind::AbsdeltaKeyword:
-        case TokenKind::AbstolKeyword:
+        case TokenKind::AbsDelayKeyword:
+        case TokenKind::AbsDeltaKeyword:
+        case TokenKind::AbsTolKeyword:
         case TokenKind::AcStimKeyword:
         case TokenKind::AccessKeyword:
         case TokenKind::AcosKeyword:
         case TokenKind::AcoshKeyword:
-        case TokenKind::AliasparamKeyword:
+        case TokenKind::AliasParamKeyword:
         case TokenKind::AnalogKeyword:
         case TokenKind::AnalysisKeyword:
         case TokenKind::AsinKeyword:
@@ -778,8 +778,8 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::BranchKeyword:
         case TokenKind::CeilKeyword:
         case TokenKind::ConnectKeyword:
-        case TokenKind::ConnectmoduleKeyword:
-        case TokenKind::ConnectrulesKeyword:
+        case TokenKind::ConnectModuleKeyword:
+        case TokenKind::ConnectRulesKeyword:
         case TokenKind::ContinuousKeyword:
         case TokenKind::CosKeyword:
         case TokenKind::CoshKeyword:
@@ -790,10 +790,10 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::DiscreteKeyword:
         case TokenKind::DomainKeyword:
         case TokenKind::DriverUpdateKeyword:
-        case TokenKind::EndconnectrulesKeyword:
-        case TokenKind::EnddisciplineKeyword:
-        case TokenKind::EndnatureKeyword:
-        case TokenKind::EndparamsetKeyword:
+        case TokenKind::EndConnectRulesKeyword:
+        case TokenKind::EndDisciplineKeyword:
+        case TokenKind::EndNatureKeyword:
+        case TokenKind::EndParamSetKeyword:
         case TokenKind::ExcludeKeyword:
         case TokenKind::ExpKeyword:
         case TokenKind::Expm1Keyword:
@@ -806,7 +806,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::HypotKeyword:
         case TokenKind::IdtKeyword:
         case TokenKind::IdtNatureKeyword:
-        case TokenKind::IdtmodKeyword:
+        case TokenKind::IdtModKeyword:
         case TokenKind::InfKeyword:
         case TokenKind::InitialStepKeyword:
         case TokenKind::LaplaceNdKeyword:
@@ -814,7 +814,7 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::LaplaceZdKeyword:
         case TokenKind::LaplaceZpKeyword:
         case TokenKind::LastCrossingKeyword:
-        case TokenKind::LimexpKeyword:
+        case TokenKind::LimExpKeyword:
         case TokenKind::LnKeyword:
         case TokenKind::Ln1pKeyword:
         case TokenKind::LogKeyword:
@@ -824,10 +824,10 @@ bool LexerFacts::isKeyword(TokenKind kind) {
         case TokenKind::NatureKeyword:
         case TokenKind::NoiseTableKeyword:
         case TokenKind::NoiseTableLogKeyword:
-        case TokenKind::ParamsetKeyword:
+        case TokenKind::ParamSetKeyword:
         case TokenKind::PotentialKeyword:
         case TokenKind::PowKeyword:
-        case TokenKind::ResolvetoKeyword:
+        case TokenKind::ResolveToKeyword:
         case TokenKind::SinKeyword:
         case TokenKind::SinhKeyword:
         case TokenKind::SlewKeyword:
@@ -1256,14 +1256,14 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::XorKeyword: return "xor";
         case TokenKind::AboveKeyword: return "above";
         case TokenKind::AbsKeyword: return "abs";
-        case TokenKind::AbsdelayKeyword: return "absdelay";
-        case TokenKind::AbsdeltaKeyword: return "absdelta";
-        case TokenKind::AbstolKeyword: return "abstol";
+        case TokenKind::AbsDelayKeyword: return "absdelay";
+        case TokenKind::AbsDeltaKeyword: return "absdelta";
+        case TokenKind::AbsTolKeyword: return "abstol";
         case TokenKind::AcStimKeyword: return "ac_stim";
         case TokenKind::AccessKeyword: return "access";
         case TokenKind::AcosKeyword: return "acos";
         case TokenKind::AcoshKeyword: return "acosh";
-        case TokenKind::AliasparamKeyword: return "aliasparam";
+        case TokenKind::AliasParamKeyword: return "aliasparam";
         case TokenKind::AnalogKeyword: return "analog";
         case TokenKind::AnalysisKeyword: return "analysis";
         case TokenKind::AsinKeyword: return "asin";
@@ -1274,8 +1274,8 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::BranchKeyword: return "branch";
         case TokenKind::CeilKeyword: return "ceil";
         case TokenKind::ConnectKeyword: return "connect";
-        case TokenKind::ConnectmoduleKeyword: return "connectmodule";
-        case TokenKind::ConnectrulesKeyword: return "connectrules";
+        case TokenKind::ConnectModuleKeyword: return "connectmodule";
+        case TokenKind::ConnectRulesKeyword: return "connectrules";
         case TokenKind::ContinuousKeyword: return "continuous";
         case TokenKind::CosKeyword: return "cos";
         case TokenKind::CoshKeyword: return "cosh";
@@ -1286,10 +1286,10 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::DiscreteKeyword: return "discrete";
         case TokenKind::DomainKeyword: return "domain";
         case TokenKind::DriverUpdateKeyword: return "driver_update";
-        case TokenKind::EndconnectrulesKeyword: return "endconnectrules";
-        case TokenKind::EnddisciplineKeyword: return "enddiscipline";
-        case TokenKind::EndnatureKeyword: return "endnature";
-        case TokenKind::EndparamsetKeyword: return "endparamset";
+        case TokenKind::EndConnectRulesKeyword: return "endconnectrules";
+        case TokenKind::EndDisciplineKeyword: return "enddiscipline";
+        case TokenKind::EndNatureKeyword: return "endnature";
+        case TokenKind::EndParamSetKeyword: return "endparamset";
         case TokenKind::ExcludeKeyword: return "exclude";
         case TokenKind::ExpKeyword: return "exp";
         case TokenKind::Expm1Keyword: return "expm1";
@@ -1302,7 +1302,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::HypotKeyword: return "hypot";
         case TokenKind::IdtKeyword: return "idt";
         case TokenKind::IdtNatureKeyword: return "idt_nature";
-        case TokenKind::IdtmodKeyword: return "idtmod";
+        case TokenKind::IdtModKeyword: return "idtmod";
         case TokenKind::InfKeyword: return "inf";
         case TokenKind::InitialStepKeyword: return "initial_step";
         case TokenKind::LaplaceNdKeyword: return "laplace_nd";
@@ -1310,7 +1310,7 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::LaplaceZdKeyword: return "laplace_zd";
         case TokenKind::LaplaceZpKeyword: return "laplace_zp";
         case TokenKind::LastCrossingKeyword: return "last_crossing";
-        case TokenKind::LimexpKeyword: return "limexp";
+        case TokenKind::LimExpKeyword: return "limexp";
         case TokenKind::LnKeyword: return "ln";
         case TokenKind::Ln1pKeyword: return "ln1p";
         case TokenKind::LogKeyword: return "log";
@@ -1320,10 +1320,10 @@ std::string_view LexerFacts::getTokenKindText(TokenKind kind) {
         case TokenKind::NatureKeyword: return "nature";
         case TokenKind::NoiseTableKeyword: return "noise_table";
         case TokenKind::NoiseTableLogKeyword: return "noise_table_log";
-        case TokenKind::ParamsetKeyword: return "paramset";
+        case TokenKind::ParamSetKeyword: return "paramset";
         case TokenKind::PotentialKeyword: return "potential";
         case TokenKind::PowKeyword: return "pow";
-        case TokenKind::ResolvetoKeyword: return "resolveto";
+        case TokenKind::ResolveToKeyword: return "resolveto";
         case TokenKind::SinKeyword: return "sin";
         case TokenKind::SinhKeyword: return "sinh";
         case TokenKind::SlewKeyword: return "slew";

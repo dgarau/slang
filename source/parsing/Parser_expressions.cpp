@@ -350,14 +350,18 @@ ExpressionSyntax& Parser::parsePrimaryExpression(bitmask<ExpressionOptions> opti
         case TokenKind::CrossKeyword:
             // SVMake VAMS P0.1: cross() is an analog event function in Verilog-AMS source only;
             // in SystemVerilog it is the covergroup keyword and stays an error here.
-            if (getPP().isVamsSource())
+            if (getPP().isVamsSource()) {
+                sawVamsSyntax = true;
                 return factory.systemName(consume());
+            }
             [[fallthrough]];
         default:
             // SVMake VAMS P0.1: keyword-named analog builtins (only lexed in VAMS source)
             // are system names, bound through the compilation's analog builtin registry.
-            if (isAnalogBuiltinKeyword(kind))
+            if (isAnalogBuiltinKeyword(kind)) {
+                sawVamsSyntax = true;
                 return factory.systemName(consume());
+            }
 
             // possibilities here:
             // 1. data type

@@ -174,6 +174,10 @@ public:
     /// (VAMS-2023 10.6), so the text stays VAMS source. `__VAMS_ENABLE__` is defined exactly then.
     bool isVamsSource() const { return currentVamsSource; }
 
+    /// SVMake VAMS P0.1: the number of tokens lexed so far as Verilog-AMS source text. The parser
+    /// compares it across a design element to tell whether any of its text was VAMS source.
+    uint64_t getVamsTokenCount() const { return vamsTokenCount; }
+
     /// Gets the currently active source library, or nullptr if none has been set.
     const SourceLibrary* getCurrentLibrary() const;
 
@@ -570,6 +574,7 @@ private:
     bool computeVamsSource(size_t index, bool skipMappings) const;
     void updateVamsSource();
     bool currentVamsSource = false;
+    uint64_t vamsTokenCount = 0;
     MacroDef vamsEnableMacro;
 
     /// Various state set by preprocessor directives.

@@ -4,6 +4,7 @@
 // SVMake VAMS P0.1: Verilog-AMS (Accellera VAMS-2023) semantics.
 
 #include "Test.h"
+#include <fstream>
 
 #include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/ASTSerializer.h"
@@ -614,7 +615,8 @@ endmodule
     compilation.addSyntaxTree(tree);
     auto c = codes(compilation);
     auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
-    CHECK(count(diag::AnalogOperatorOutsideAnalog) == 3);
+    CHECK(count(diag::AnalogOperatorOutsideAnalog) == 2);
+    CHECK(count(diag::NotAllowedInAnalogInitial) == 1);
     CHECK(count(diag::AnalysisArgNotString) == 1);
     CHECK(count(diag::VamsNotSupported) == 1);
 }
@@ -683,14 +685,20 @@ module m;
     end
 endmodule
 `end_keywords
-module s;
+package s;
+    function real f(); return `SINE; endfunction
+endpackage
+module s2;
     real y;
     initial y = `SINE;
 endmodule
 )");
     Compilation compilation;
     compilation.addSyntaxTree(tree);
+    // L9: outside a VAMS definition (here a package) a macro-carried builtin finds nothing.
+    // A module that expands one is VAMS itself (CR-H1), so `s2` binds it.
     CHECK(codes(compilation) == std::vector<DiagCode>{diag::UnknownSystemName});
+    CHECK(compilation.getRoot().lookupName<InstanceSymbol>("s2").getDefinition().isVams);
 }
 
 
@@ -1033,4 +1041,193 @@ module k; electrical a; analog V(a) <+ 1.0; endmodule
     c3.addSyntaxTree(t3);
     auto d3 = c3.getAllDiagnostics();
     CHECK(d3.empty());
+}
+
+// ----- C5: closing-review fixes -----
+
+TEST_CASE("VAMS definitions with VAMS text anywhere are VAMS (CR-H1)") {
+    auto& sm = getSourceManager();
+    sm.assignText("cr_abody.vams", "analog begin x = 1.5k; end\n");
+
+    PreprocessorOptions ppo;
+    ppo.keywordMapping.push_back({"*.vams", KeywordVersion::vams_2023});
+    ppo.additionalIncludePaths.push_back(findTestDir() + "vams");
+    Bag bag;
+    bag.set(ppo);
+
+    auto isVams = [](Compilation& c, std::string_view name) {
+        return c.getRoot().lookupName<InstanceSymbol>(name).getDefinition().isVams;
+    };
+
+    // An SV module that includes a .vams body with an analog block.
+    {
+        auto tree = SyntaxTree::fromText(R"(
+module si;
+    real x;
+`include "cr_abody.vams"
+    initial #10 $display("%f", x);
+endmodule
+module plain; endmodule
+)",
+                                         sm, "cr_i.sv", "", bag);
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        NO_COMPILATION_ERRORS;
+        CHECK(isVams(compilation, "si"));
+        CHECK(!isVams(compilation, "plain"));
+    }
+
+    // An in-module `begin_keywords "VAMS-2023" (an error, but the definition is still VAMS).
+    {
+        auto tree = SyntaxTree::fromText(R"(
+module sj;
+    real x;
+`begin_keywords "VAMS-2023"
+    analog x = 1.0;
+`end_keywords
+endmodule
+module after; endmodule
+)",
+                                         sm, "cr_j.sv", "", bag);
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        CHECK(isVams(compilation, "sj"));
+        CHECK(!isVams(compilation, "after"));
+    }
+
+    // A macro defined in VAMS source that expands VAMS syntax inside an SV module.
+    {
+        auto tree = SyntaxTree::fromText(R"(
+`begin_keywords "VAMS-2023"
+`define AB analog x = sin(1.0);
+`end_keywords
+module sk;
+    real x;
+    `AB
+endmodule
+)",
+                                         sm, "cr_k.sv", "", bag);
+        Compilation compilation;
+        compilation.addSyntaxTree(tree);
+        CHECK(isVams(compilation, "sk"));
+    }
+}
+
+TEST_CASE("VAMS analog initial restrictions and event-statement rules (CR-M1..M3)") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    real x;
+    analog initial begin
+        @(initial_step) x = 1;
+        @(cross(x - 1, 1)) x = 2;
+        x = V(a);
+        x = ddt(x);
+    end
+    analog begin
+        @(cross(V(a) - 1, 1)) x = ddt(V(a));
+        @(initial_step) @(cross(V(a) - 1, 1)) x = 1;
+        V(a) <+ x;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
+    CHECK(count(diag::NotAllowedInAnalogInitial) == 4);
+    CHECK(count(diag::AnalogOperatorInEvent) == 1);
+    CHECK(count(diag::NestedAnalogEvent) == 1);
+    CHECK(count(diag::AnalogOperatorOutsideAnalog) == 0);
+    CHECK(c.size() == 6);
+}
+
+TEST_CASE("VAMS closing-review LOW fixes (CR-L1..L4, L8, L9)") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+nature Cy1 : Cy2 endnature
+nature Cy2 : Cy1 endnature
+nature BadTol units = "V"; access = BT; abstol = "x"; endnature
+module m;
+    electrical a, b;
+    real x;
+    wire #(1u, 2n) w;
+    branch (a, b, a) b3;
+    always @(V(a)) x = 1;
+    initial #(5u) x = 2;
+    analog begin : blk
+        electrical z;
+        I(a) <+ "str";
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    auto count = [&](DiagCode code) { return std::ranges::count(c, code); };
+    CHECK(count(diag::NatureCycle) >= 1);
+    CHECK(count(diag::NatureAbstolNotNumeric) == 1);
+    CHECK(count(diag::ScaledDelay) == 3);
+    CHECK(count(diag::BranchTooManyTerminals) == 1);
+    CHECK(count(diag::BranchTerminalNotNet) == 0);
+    CHECK(count(diag::VamsNotSupported) == 1);
+    CHECK(count(diag::NetDeclaredInBlock) == 1);
+    CHECK(count(diag::ContributionValueNotNumeric) == 1);
+
+    // In SystemVerilog an `e` real is not a scale factor (CR-L1).
+    auto sv = SyntaxTree::fromText("module s; real r; initial #1.5e r = 1; endmodule\n");
+    Compilation c2;
+    c2.addSyntaxTree(sv);
+    for (auto& d : c2.getAllDiagnostics())
+        CHECK(d.code != diag::ScaledDelay);
+}
+
+TEST_CASE("VAMS nature redefinitions name both sites and the macro (CR-L6)") {
+    auto unitA = std::string(VamsPrefix) +
+                 "`define VOLTAGE_ABSTOL 1e-3\n`include \"disciplines.vams\"\nmodule a; endmodule\n";
+    auto unitB = std::string(VamsPrefix) + "`include \"disciplines.vams\"\nmodule b; endmodule\n";
+    Compilation compilation;
+    compilation.addSyntaxTree(SyntaxTree::fromText(unitA, vamsOptions(), "a"));
+    compilation.addSyntaxTree(SyntaxTree::fromText(unitB, vamsOptions(), "b"));
+    auto diags = compilation.getAllDiagnostics();
+    REQUIRE(diags.size() == 1);
+    auto& d = diags[0];
+    CHECK(d.code == diag::NatureRedefinition);
+    CHECK(d.isError());
+    REQUIRE(d.notes.size() == 2);
+    CHECK(d.notes[0].code == diag::NotePreviousDefinition);
+    CHECK(d.notes[1].code == diag::NoteBodiesDifferInMacro);
+    CHECK(report(diags).find("VOLTAGE_ABSTOL") != std::string::npos);
+}
+
+TEST_CASE("VAMS natures and disciplines share the module-level scope (CR-L7, 3.13.1)") {
+    // VAMS-2023 3.13.1: natures and disciplines are defined at the same level of scope as
+    // modules. The LRM gives no rule for a clash, so it is a warning.
+    auto tree = vamsTree(R"(
+nature Same units = "V"; access = S; abstol = 1; endnature
+discipline Same potential Same; enddiscipline
+discipline mod1 domain discrete; enddiscipline
+module mod1; endmodule
+module top; mod1 u(); endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto diags = compilation.getAllDiagnostics();
+    int warnings = 0;
+    for (auto& d : diags) {
+        CHECK(d.code == diag::VamsNameConflict);
+        CHECK(!d.isError());
+        warnings++;
+    }
+    CHECK(warnings == 2);
+}
+
+TEST_CASE("VAMS constants.vams marks itself as a modified copy (CR-L11)") {
+    std::ifstream in(findTestDir() + "vams/constants.vams", std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(text.find("modified copy of the VAMS-2023 Annex D text: one correction") !=
+          std::string::npos);
+    CHECK(text.find("this marker line, and layout whitespace") != std::string::npos);
+    CHECK(text.find("\xE2\x80\x98") == std::string::npos); // no U+2018 left
 }

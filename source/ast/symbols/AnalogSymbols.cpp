@@ -85,12 +85,13 @@ void NatureSymbol::resolve() const {
                 scope->addDiag(diag::UnknownNature, pc->name.range()) << parentName;
         }
 
-        if (parent == this)
-            parent = nullptr;
         if (parent) {
             parent->resolve();
-            if (parent->resolving) // a cycle in the parent chain
+            if (parent == this || parent->resolving) {
+                // A cycle in the parent chain.
+                scope->addDiag(diag::NatureCycle, pc->name.range()) << name;
                 parent = nullptr;
+            }
         }
     }
 
@@ -137,11 +138,16 @@ void NatureSymbol::resolve() const {
                 hasUnits = true;
                 break;
             }
-            case TokenKind::AbstolKeyword: {
+            case TokenKind::AbsTolKeyword: {
                 auto& expr = Expression::bind(value, context);
-                auto cv = context.eval(expr);
-                if (cv)
+                if (expr.bad()) {
+                }
+                else if (expr.kind == ExpressionKind::StringLiteral || !expr.type->isNumeric()) {
+                    scope->addDiag(diag::NatureAbstolNotNumeric, value.sourceRange());
+                }
+                else if (auto cv = context.eval(expr)) {
                     abstol = cv.convertToReal().real();
+                }
                 hasAbstol = true;
                 break;
             }
@@ -505,8 +511,11 @@ void BranchSymbol::resolve() const {
     positive = AnalogTerminal::bind(*decl.terminals[0], context);
     if (decl.terminals.size() > 1)
         negative = AnalogTerminal::bind(*decl.terminals[1], context);
-    if (decl.terminals.size() > 2 && first)
-        context.addDiag(diag::BranchTerminalNotNet, decl.terminals[2]->sourceRange());
+    if (decl.terminals.size() > 2) {
+        if (first)
+            context.addDiag(diag::BranchTooManyTerminals, decl.terminals[2]->sourceRange());
+        return;
+    }
 
     if (!positive.net || (negative && !negative->net))
         return;
@@ -633,6 +642,12 @@ Expression& BranchAccessExpression::fromSyntax(Compilation& comp, std::string_vi
     auto range = invocation.sourceRange();
     auto bad = [&]() -> Expression& { return badExpr(comp, nullptr); };
 
+    // 5.2.1: an analog initial block has no statements with access functions.
+    if (context.flags.has(ASTFlags::AnalogInitial)) {
+        context.addDiag(diag::NotAllowedInAnalogInitial, range) << "an access function"sv;
+        return bad();
+    }
+
     // 4.4: a branch identifier, or one or two net expressions.
     SmallVector<const ExpressionSyntax*, 2> args;
     if (invocation.arguments) {
@@ -757,12 +772,27 @@ void BranchAccessExpression::serializeTo(ASTSerializer& serializer) const {
 Statement& ContributionStatement::fromSyntax(Compilation& comp,
                                              const ContributionStatementSyntax& syntax,
                                              const ASTContext& context) {
+    // analog initial takes an analog_function_statement, which has no contributions (5.2.1);
+    // report that before the target's own analog-initial error.
+    if (context.flags.has(ASTFlags::AnalogInitial) && context.flags.has(ASTFlags::AnalogBlock)) {
+        context.addDiag(diag::ContributionInAnalogInitial, syntax.op.range());
+        auto& lhs = *comp.emplace<InvalidExpression>(nullptr, comp.getErrorType());
+        return badStmt(comp, comp.emplace<ContributionStatement>(lhs, lhs, syntax.sourceRange()));
+    }
+
     auto& lhs = Expression::bind(*syntax.lhs, context);
     auto& rhs = Expression::bindRValue(comp.getRealType(), *syntax.rhs, syntax.op.range(),
                                        context);
     auto result = comp.emplace<ContributionStatement>(lhs, rhs, syntax.sourceRange());
     if (lhs.bad() || rhs.bad())
         return badStmt(comp, result);
+
+    // An analog_expression is numeric; a string literal would convert as a bit vector.
+    if (rhs.unwrapImplicitConversions().kind == ExpressionKind::StringLiteral ||
+        !rhs.unwrapImplicitConversions().type->isNumeric()) {
+        context.addDiag(diag::ContributionValueNotNumeric, rhs.sourceRange);
+        return badStmt(comp, result);
+    }
 
     // 5.6: the target is a branch access function call (branch_lvalue).
     if (lhs.kind != ExpressionKind::BranchAccess) {

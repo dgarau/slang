@@ -68,7 +68,7 @@ SPDX-License-Identifier = "CC-BY-SA-3.0"
 
 # SVMake VAMS P0.1: the Verilog-AMS standard definition files of Accellera VAMS-2023 Annex D.
 # disciplines.vams is the Annex D.1 text (sha256 54e59ce5...c031); constants.vams is the Annex D.2
-# text with one correction (sha256 e9216737...79c9): the 2023 PDF prints the `define P_U0 line
+# text with one correction (sha256 a97b6e38...aea9): the 2023 PDF prints the `define P_U0 line
 # with typographic quotes, replaced by grave accents and marked in the file. Rebuilt from the
 # PDF text (pdftotext -layout, cross-checked token by token against -raw); a whitespace-insensitive
 # diff against Accellera's published 2.4.0 files shows only the header for disciplines.vams and,

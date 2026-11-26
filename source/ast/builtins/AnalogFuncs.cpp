@@ -25,8 +25,18 @@ using parsing::TokenKind;
 // analog initial (whose statements are analog_function_statements).
 static bool requireAnalogBlock(const ASTContext& context, std::string_view name,
                                SourceRange range) {
-    if (!context.flags.has(ASTFlags::AnalogBlock) || context.flags.has(ASTFlags::AnalogInitial)) {
+    if (!context.flags.has(ASTFlags::AnalogBlock)) {
         context.addDiag(diag::AnalogOperatorOutsideAnalog, range) << name;
+        return false;
+    }
+    if (context.flags.has(ASTFlags::AnalogInitial)) {
+        context.addDiag(diag::NotAllowedInAnalogInitial, range)
+            << fmt::format("the analog operator '{}'", name);
+        return false;
+    }
+    // 4.5.1: analog operators shall not be used inside event triggered statements.
+    if (context.flags.has(ASTFlags::AnalogEvent)) {
+        context.addDiag(diag::AnalogOperatorInEvent, range) << name;
         return false;
     }
     return true;
@@ -356,7 +366,7 @@ void Builtins::registerAnalogFuncs() {
     add(TokenKind::IdtKeyword, std::make_shared<AnalogOperatorFunction>("idt", AK::Idt, 1, 4));
     add(TokenKind::TransitionKeyword,
         std::make_shared<AnalogOperatorFunction>("transition", AK::Transition, 1, 5));
-    add(TokenKind::LimexpKeyword,
+    add(TokenKind::LimExpKeyword,
         std::make_shared<AnalogOperatorFunction>("limexp", AK::Limexp, 1, 1));
     add(TokenKind::AnalysisKeyword, std::make_shared<AnalysisFunction>());
     add(TokenKind::InitialStepKeyword,
@@ -366,8 +376,8 @@ void Builtins::registerAnalogFuncs() {
     add(TokenKind::CrossKeyword, std::make_shared<AnalogEventFunction>("cross", AK::Cross));
 
     for (auto [kind, name] : {std::pair{TokenKind::DdxKeyword, "ddx"},
-                              {TokenKind::IdtmodKeyword, "idtmod"},
-                              {TokenKind::AbsdelayKeyword, "absdelay"},
+                              {TokenKind::IdtModKeyword, "idtmod"},
+                              {TokenKind::AbsDelayKeyword, "absdelay"},
                               {TokenKind::SlewKeyword, "slew"},
                               {TokenKind::LastCrossingKeyword, "last_crossing"},
                               {TokenKind::LaplaceNdKeyword, "laplace_nd"},
@@ -385,7 +395,7 @@ void Builtins::registerAnalogFuncs() {
                               {TokenKind::NoiseTableLogKeyword, "noise_table_log"},
                               {TokenKind::AboveKeyword, "above"},
                               {TokenKind::TimerKeyword, "timer"},
-                              {TokenKind::AbsdeltaKeyword, "absdelta"}}) {
+                              {TokenKind::AbsDeltaKeyword, "absdelta"}}) {
         add(kind, std::make_shared<UnsupportedAnalogFunction>(name));
     }
 

@@ -163,6 +163,7 @@ StatementSyntax& Parser::parseStatement(bool allowEmpty, bool allowSuperNew) {
         // SVMake VAMS P0.1: contribution_statement ::= branch_lvalue <+ analog_expression ;
         // The token only exists in Verilog-AMS source.
         if (peek(TokenKind::LessThanPlus)) {
+            sawVamsSyntax = true;
             auto op = consume();
             auto& rhs = parseExpression();
             return factory.contributionStatement(label, attributes, expr, op, rhs,

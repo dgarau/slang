@@ -297,6 +297,15 @@ const Statement& Statement::bind(const StatementSyntax& syntax, const ASTContext
                         what = "a delay control"sv;
                         break;
                     default:
+                        // 5.2.1: analog initial has no event control statements; A.6.4: an
+                        // analog_event_statement has no nested event control.
+                        if (context.flags.has(ASTFlags::AnalogInitial)) {
+                            context.addDiag(diag::NotAllowedInAnalogInitial, syntax.sourceRange())
+                                << "an event control"sv;
+                        }
+                        else if (context.flags.has(ASTFlags::AnalogEvent)) {
+                            context.addDiag(diag::NestedAnalogEvent, syntax.sourceRange());
+                        }
                         break;
                 }
                 break;
