@@ -19,3 +19,5 @@ installs as its built-in Verilog-AMS include directory. Licence: LICENSES/Licens
 
 c1top.vams, c1body.vh, c1plain.sv: Driver test for --map-keyword-version.
 proto/: byte-for-byte copies of svmake tests/rtl/vams/proto/*.vams (VAMS P0.5 fixtures).
+t_vams_kwd_bad.v: byte-for-byte copy of svmake tests/rtl/lrm/22-compiler-directives/t_vams_kwd_bad.v
+  (from Verilator t/t_vams_kwd_bad.v, CC0-1.0 per its own header).

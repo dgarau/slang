@@ -209,7 +209,13 @@ Statement& TimedStatement::fromSyntax(Compilation& compilation,
     auto& timing = TimingControl::bind(*syntax.timingControl, context);
     stmtCtx.observeTiming(timing);
 
-    auto& stmt = Statement::bind(*syntax.statement, context, stmtCtx);
+    // SVMake VAMS P0.1: in an analog block the statement of an event control is an
+    // analog_event_statement, which has no contributions (VAMS-2023 5.10, A.6.4).
+    auto stmtContext = context;
+    if (context.flags.has(ASTFlags::AnalogBlock))
+        stmtContext.flags |= ASTFlags::AnalogEvent;
+
+    auto& stmt = Statement::bind(*syntax.statement, stmtContext, stmtCtx);
     auto result = compilation.emplace<TimedStatement>(timing, stmt, syntax.sourceRange());
 
     if (timing.bad() || stmt.bad())

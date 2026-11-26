@@ -1347,6 +1347,11 @@ error AnalogOperatorOutsideAnalog "the analog operator '{}' is only allowed in a
 error AnalysisArgNotString "the arguments of analysis() must be string literals"
 error NotAllowedInAnalog "{} is not allowed in an analog block"
 error ScaledDelay "a scale factor is not allowed in a digital delay"
+error ContributionInEventStatement "contribution statements are not allowed in the statement of an analog event control"
+error AnalogEventNotInEventControl "the analog event '{}' can only be used as an event control"
+error AnalogEventInDigital "the analog event '{}' is only allowed in an analog block"
+error AnalogEventArgNotString "the arguments of '{}' must be string literals naming analyses"
+error CrossDirectionInvalid "the direction of cross() must be -1, 0 or +1"
 
 // Following are groups of diagnostics, to make it easy to control them from the command line.
 // The default group is the set of warnings that are enabled by default.

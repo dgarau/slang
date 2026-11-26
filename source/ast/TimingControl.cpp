@@ -11,6 +11,7 @@
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
 #include "slang/ast/Expression.h"
+#include "slang/ast/SystemSubroutine.h"
 #include "slang/ast/expressions/MiscExpressions.h"
 #include "slang/ast/types/Type.h"
 #include "slang/diagnostics/ExpressionsDiags.h"
@@ -385,6 +386,21 @@ static TimingControl& cloneClockingEvent(Compilation& comp, const TimingControl&
 TimingControl& SignalEventControl::fromExpr(Compilation& compilation, EdgeKind edge,
                                             const Expression& expr, const Expression* iffCondition,
                                             const ASTContext& context, SourceRange sourceRange) {
+    // SVMake VAMS P0.1: Verilog-AMS analog event functions.
+    if (expr.kind == ExpressionKind::Call && expr.as<CallExpression>().isSystemCall()) {
+        auto& call = expr.as<CallExpression>();
+        auto sub = std::get<CallExpression::SystemCallInfo>(call.subroutine).subroutine;
+        switch (sub->analogKind) {
+            case AnalogBuiltinKind::InitialStep:
+            case AnalogBuiltinKind::FinalStep:
+            case AnalogBuiltinKind::Cross:
+                return AnalogEventControl::fromCall(compilation, call, edge, iffCondition, context,
+                                                    sourceRange);
+            default:
+                break;
+        }
+    }
+
     auto result = compilation.emplace<SignalEventControl>(edge, expr, iffCondition, sourceRange);
     if (expr.bad())
         return badCtrl(compilation, result);
@@ -676,6 +692,104 @@ void BlockEventListControl::serializeTo(ASTSerializer& serializer) const {
         serializer.endObject();
     }
     serializer.endArray();
+}
+
+} // namespace slang::ast
+
+namespace slang::ast {
+
+// SVMake VAMS P0.1
+TimingControl& AnalogEventControl::fromCall(Compilation& compilation, const CallExpression& call,
+                                            EdgeKind edge, const Expression* iffCondition,
+                                            const ASTContext& context, SourceRange sourceRange) {
+    auto sub = std::get<CallExpression::SystemCallInfo>(call.subroutine).subroutine;
+    auto kind = sub->analogKind;
+
+    SmallVector<const Expression*> args;
+    SmallVector<std::string_view> analyses;
+    for (auto arg : call.arguments()) {
+        if (arg->kind == ExpressionKind::EmptyArgument) {
+            args.push_back(nullptr);
+            continue;
+        }
+        args.push_back(arg);
+        if (kind != AnalogBuiltinKind::Cross)
+            analyses.push_back(arg->as<StringLiteral>().getValue());
+    }
+
+    auto result = compilation.emplace<AnalogEventControl>(kind, args.copy(compilation),
+                                                          analyses.copy(compilation), sourceRange);
+
+    if (edge != EdgeKind::None || iffCondition) {
+        context.addDiag(diag::AnalogEventNotInEventControl, call.sourceRange)
+            << call.getSubroutineName();
+        return badCtrl(compilation, result);
+    }
+
+    // initial_step and final_step exist only in the analog context (5.10.2); cross() is
+    // also an A2D event in digital procedural code (7.3.4).
+    if (kind != AnalogBuiltinKind::Cross && !context.flags.has(ASTFlags::AnalogBlock)) {
+        context.addDiag(diag::AnalogEventInDigital, call.sourceRange) << call.getSubroutineName();
+        return badCtrl(compilation, result);
+    }
+
+    if (kind == AnalogBuiltinKind::Cross && args.size() > 1 && args[1]) {
+        if (auto cv = context.tryEval(*args[1]); cv) {
+            auto dir = cv.convertToInt().integer().as<int64_t>();
+            if (!dir || *dir < -1 || *dir > 1) {
+                context.addDiag(diag::CrossDirectionInvalid, args[1]->sourceRange);
+                return badCtrl(compilation, result);
+            }
+        }
+    }
+
+    return *result;
+}
+
+bool AnalogEventControl::isEquivalentImpl(const AnalogEventControl& rhs) const {
+    if (eventKind != rhs.eventKind || args.size() != rhs.args.size() ||
+        !std::ranges::equal(analyses, rhs.analyses)) {
+        return false;
+    }
+    for (size_t i = 0; i < args.size(); i++) {
+        if (!args[i] != !rhs.args[i])
+            return false;
+        if (args[i] && !args[i]->isEquivalentTo(*rhs.args[i]))
+            return false;
+    }
+    return true;
+}
+
+void AnalogEventControl::serializeTo(ASTSerializer& serializer) const {
+    switch (eventKind) {
+        case AnalogBuiltinKind::InitialStep:
+            serializer.write("event", "initial_step"sv);
+            break;
+        case AnalogBuiltinKind::FinalStep:
+            serializer.write("event", "final_step"sv);
+            break;
+        default:
+            serializer.write("event", "cross"sv);
+            break;
+    }
+    serializer.startArray("args");
+    for (auto arg : args) {
+        if (arg) {
+            serializer.serialize(*arg);
+        }
+        else {
+            // An omitted argument (cross(e, , tol)).
+            serializer.startObject();
+            serializer.endObject();
+        }
+    }
+    serializer.endArray();
+    if (!analyses.empty()) {
+        serializer.startArray("analyses");
+        for (auto a : analyses)
+            serializer.serialize(a);
+        serializer.endArray();
+    }
 }
 
 } // namespace slang::ast

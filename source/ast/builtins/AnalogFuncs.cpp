@@ -249,6 +249,49 @@ public:
     }
 };
 
+// initial_step, final_step, cross (VAMS-2023 5.10): legal only as an event control, where
+// SignalEventControl turns the call into an AnalogEventControl.
+class AnalogEventFunction : public AnalogBuiltin {
+public:
+    AnalogEventFunction(std::string_view name, AnalogBuiltinKind kind) :
+        AnalogBuiltin(name, kind) {}
+
+    bool allowEmptyArgument(size_t index) const final {
+        return analogKind == AnalogBuiltinKind::Cross && index > 0;
+    }
+
+    const Type& checkArguments(const ASTContext& context, const Args& args, SourceRange range,
+                               const Expression*) const final {
+        auto& comp = context.getCompilation();
+        if (!context.flags.has(ASTFlags::EventExpression)) {
+            context.addDiag(diag::AnalogEventNotInEventControl, range) << name;
+            return comp.getErrorType();
+        }
+
+        if (analogKind == AnalogBuiltinKind::Cross) {
+            if (!checkArgCount(context, false, args, range, 1, 5) ||
+                !checkNumericArgs(context, args)) {
+                return comp.getErrorType();
+            }
+        }
+        else {
+            for (auto arg : args) {
+                if (arg->kind != ExpressionKind::StringLiteral) {
+                    context.addDiag(diag::AnalogEventArgNotString, arg->sourceRange) << name;
+                    return comp.getErrorType();
+                }
+            }
+        }
+        return comp.getBitType();
+    }
+
+    ConstantValue eval(EvalContext& context, const Args&, SourceRange range,
+                       const CallExpression::SystemCallInfo&) const final {
+        notConst(context, range);
+        return nullptr;
+    }
+};
+
 // A reserved Verilog-AMS function whose semantics are P1.
 class UnsupportedAnalogFunction : public AnalogBuiltin {
 public:
@@ -316,6 +359,11 @@ void Builtins::registerAnalogFuncs() {
     add(TokenKind::LimexpKeyword,
         std::make_shared<AnalogOperatorFunction>("limexp", AK::Limexp, 1, 1));
     add(TokenKind::AnalysisKeyword, std::make_shared<AnalysisFunction>());
+    add(TokenKind::InitialStepKeyword,
+        std::make_shared<AnalogEventFunction>("initial_step", AK::InitialStep));
+    add(TokenKind::FinalStepKeyword,
+        std::make_shared<AnalogEventFunction>("final_step", AK::FinalStep));
+    add(TokenKind::CrossKeyword, std::make_shared<AnalogEventFunction>("cross", AK::Cross));
 
     for (auto [kind, name] : {std::pair{TokenKind::DdxKeyword, "ddx"},
                               {TokenKind::IdtmodKeyword, "idtmod"},
@@ -334,7 +382,10 @@ void Builtins::registerAnalogFuncs() {
                               {TokenKind::WhiteNoiseKeyword, "white_noise"},
                               {TokenKind::FlickerNoiseKeyword, "flicker_noise"},
                               {TokenKind::NoiseTableKeyword, "noise_table"},
-                              {TokenKind::NoiseTableLogKeyword, "noise_table_log"}}) {
+                              {TokenKind::NoiseTableLogKeyword, "noise_table_log"},
+                              {TokenKind::AboveKeyword, "above"},
+                              {TokenKind::TimerKeyword, "timer"},
+                              {TokenKind::AbsdeltaKeyword, "absdelta"}}) {
         add(kind, std::make_shared<UnsupportedAnalogFunction>(name));
     }
 

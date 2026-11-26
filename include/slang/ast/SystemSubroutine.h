@@ -24,26 +24,6 @@ class Type;
 /// subroutine in the language. System subroutines must be
 /// registered with the compilation in order to be findable
 /// via name lookup.
-/// SVMake VAMS P0.1: identifies Verilog-AMS built-in functions (VAMS-2023 4.3, 4.5, 4.6, 5.10,
-/// 9.10) so consumers can switch on a kind rather than on names.
-enum class SLANG_EXPORT AnalogBuiltinKind : uint8_t {
-    None,
-    Math,
-    Ddt,
-    Idt,
-    Transition,
-    Limexp,
-    Analysis,
-    Abstime,
-    InitialStep,
-    FinalStep,
-    Cross,
-    Above,
-    Timer,
-    Absdelta,
-    Unsupported
-};
-
 class SLANG_EXPORT SystemSubroutine {
 public:
     using KnownSystemName = parsing::KnownSystemName;

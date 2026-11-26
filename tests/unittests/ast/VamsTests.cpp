@@ -5,6 +5,7 @@
 
 #include "Test.h"
 
+#include "slang/analysis/AnalysisManager.h"
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
@@ -690,3 +691,248 @@ endmodule
     CHECK(codes(compilation) == std::vector<DiagCode>{diag::UnknownSystemName});
 }
 
+
+TEST_CASE("VAMS analog events") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a, gnd;
+    ground gnd;
+    real x;
+    integer n;
+    analog begin
+        @(initial_step) x = 0;
+        @(initial_step("tran", "dc")) x = 1;
+        @(final_step) $display("done");
+        @(cross(V(a) - 0.5, 1)) n = n + 1;
+        @(cross(V(a), , 1e-9)) n = 0;
+        @(initial_step or cross(V(a), -1)) x = 2;
+        V(a) <+ x;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    std::vector<const AnalogEventControl*> events;
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    body.visit(makeVisitor([&](auto& v, const AnalogEventControl& ev) {
+        events.push_back(&ev);
+        v.visitDefault(ev);
+    }));
+    REQUIRE(events.size() == 7);
+    CHECK(events[0]->eventKind == AnalogBuiltinKind::InitialStep);
+    CHECK(events[0]->analyses.empty());
+    CHECK(events[1]->eventKind == AnalogBuiltinKind::InitialStep);
+    CHECK(std::ranges::equal(events[1]->analyses, std::vector<std::string_view>{"tran", "dc"}));
+    CHECK(events[2]->eventKind == AnalogBuiltinKind::FinalStep);
+    CHECK(events[3]->eventKind == AnalogBuiltinKind::Cross);
+    REQUIRE(events[3]->args.size() == 2);
+    CHECK(events[3]->args[0]->kind == ExpressionKind::BinaryOp);
+    REQUIRE(events[4]->args.size() == 3);
+    CHECK(events[4]->args[1] == nullptr);
+    CHECK(events[4]->args[2] != nullptr);
+    CHECK(events[5]->eventKind == AnalogBuiltinKind::InitialStep);
+    CHECK(events[6]->eventKind == AnalogBuiltinKind::Cross);
+}
+
+TEST_CASE("VAMS cross() in digital code, initial_step only in analog") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical in;
+    reg q = 1'b0;
+    always @(cross(V(in) - 0.5, +1, 1.0e-12)) q <= ~q;
+    initial @(cross(V(in))) q = 1;
+    always @(initial_step) q = 0;
+    always @(posedge cross(V(in))) q = 0;
+    initial q = initial_step;
+    analog @(cross(V(in), 2)) q = 1;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    CHECK(c == std::vector<DiagCode>{diag::AnalogEventInDigital, diag::AnalogEventNotInEventControl,
+                                     diag::AnalogEventNotInEventControl,
+                                     diag::CrossDirectionInvalid});
+
+    auto& root = compilation.getRoot();
+    auto& body = root.lookupName<InstanceSymbol>("m").body;
+    int crossInAlways = 0;
+    body.visit(makeVisitor([&](auto& v, const ProceduralBlockSymbol& pb) {
+        if (pb.getBody().kind == StatementKind::Timed &&
+            pb.getBody().as<TimedStatement>().timing.kind == TimingControlKind::AnalogEvent) {
+            crossInAlways++;
+        }
+        v.visitDefault(pb);
+    }));
+    CHECK(crossInAlways == 2);
+}
+
+TEST_CASE("VAMS contributions are not allowed in event statements") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    reg clk;
+    real x;
+    analog begin
+        @(cross(V(a))) V(a) <+ 1.0;
+        @(initial_step) begin
+            if (x > 0) I(a) <+ 1.0;
+        end
+        @(posedge clk) x = V(a);
+        V(a) <+ x;
+    end
+    analog @(above(V(a))) x = 1;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    CHECK(c == std::vector<DiagCode>{diag::ContributionInEventStatement,
+                                     diag::ContributionInEventStatement, diag::VamsNotSupported});
+}
+
+TEST_CASE("VAMS digital events in analog blocks are legal") {
+    // V-H4: VAMS-2023 5.10.5, A.6.5 analog_event_expression.
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a;
+    reg clk;
+    real x;
+    analog begin
+        @(posedge clk) x = V(a);
+        @(clk or initial_step) x = 0;
+        V(a) <+ x;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+}
+
+TEST_CASE("VAMS P0.5 fixtures compile clean") {
+    // V-H6: byte-for-byte copies of svmake tests/rtl/vams/proto/*.vams, mapped to VAMS-2023.
+    auto dir = findTestDir() + "vams/proto/";
+    for (auto name : {"p1_rc_step.vams", "p2_diode_rect.vams", "p3_cmp_dff_rc.vams",
+                      "p4_relax_osc.vams", "p5_steps_smoke.vams"}) {
+        INFO(name);
+        PreprocessorOptions ppo;
+        ppo.additionalIncludePaths.push_back(findTestDir() + "vams");
+        ppo.keywordMapping.push_back({".../*.vams", KeywordVersion::vams_2023});
+        Bag bag;
+        bag.set(ppo);
+        auto tree = SyntaxTree::fromFile(dir + name, getSourceManager(), bag);
+        REQUIRE(tree);
+        Compilation compilation(bag);
+        compilation.addSyntaxTree(*tree);
+        NO_COMPILATION_ERRORS;
+
+        // The analysis pass (drivers, multi-driver, unused) must accept the analog design.
+        compilation.freeze();
+        analysis::AnalysisManager analysis;
+        analysis.analyze(compilation);
+        auto adiags = filterWarnings(analysis.getDiagnostics());
+        if (!adiags.empty())
+            FAIL_CHECK(report(adiags));
+    }
+}
+
+TEST_CASE("VAMS AST walk and serialization") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module res(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1k;
+    analog I(p, n) <+ V(p, n) / r;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("res").body;
+    const AnalogBlockSymbol* block = nullptr;
+    for (auto& member : body.members()) {
+        if (member.kind == SymbolKind::AnalogBlock)
+            block = &member.as<AnalogBlockSymbol>();
+    }
+    REQUIRE(block);
+
+    JsonWriter writer;
+    ASTSerializer serializer(compilation, writer);
+    serializer.setIncludeAddresses(false);
+    serializer.serialize(*block);
+    // L11: the golden covers the VAMS subtree only (the analog block of `res`).
+    CHECK(writer.view() ==
+          R"({"name":"","kind":"AnalogBlock","isInitial":false,"body":{"kind":"Contribution",)"
+          R"("lhs":{"kind":"BranchAccess","type":"real","access":"flow","nature":"Current",)"
+          R"("discipline":"electrical","positive":{"kind":"NamedValue","type":"logic","symbol":"p"},)"
+          R"("negative":{"kind":"NamedValue","type":"logic","symbol":"n"}},"rhs":{"kind":"BinaryOp",)"
+          R"("type":"real","op":"Divide","left":{"kind":"BranchAccess","type":"real",)"
+          R"("access":"potential","nature":"Voltage","discipline":"electrical","positive":)"
+          R"({"kind":"NamedValue","type":"logic","symbol":"p"},"negative":{"kind":"NamedValue",)"
+          R"("type":"logic","symbol":"n"}},"right":{"kind":"NamedValue","type":"real","symbol":"r",)"
+          R"("constant":"1000"}}}})");
+}
+
+TEST_CASE("VAMS t_vams_kwd_bad: every VAMS-2.3 keyword line is a syntax error") {
+    auto path = findTestDir() + "vams/t_vams_kwd_bad.v";
+    auto tree = SyntaxTree::fromFile(path, getSourceManager());
+    REQUIRE(tree);
+    Compilation compilation;
+    compilation.addSyntaxTree(*tree);
+    auto& sm = getSourceManager();
+
+    // Expected: for each `int <word>;` line, a parse error at the word's column when the word
+    // is a VAMS-2.3 keyword, otherwise (assert) an undeclared type `int` at column 3.
+    auto text = sm.getSourceText((*tree)->root().getFirstToken().location().buffer());
+    std::map<size_t, std::pair<size_t, bool>> expected; // line -> (column, isKeyword)
+    size_t lineNo = 1, pos = 0;
+    while (pos < text.size()) {
+        auto end = text.find('\n', pos);
+        auto line = text.substr(pos, end == std::string_view::npos ? text.size() - pos : end - pos);
+        if (line.starts_with("  int ") && line.ends_with(";")) {
+            auto word = line.substr(6, line.size() - 7);
+            // Every word in Verilator's list is a VAMS-2.3 keyword except `assert` (an SV
+            // keyword the list includes); decided here independently of the keyword tables.
+            bool kw = word != "assert";
+            expected[lineNo] = {kw ? 7 : 3, kw};
+        }
+        lineNo++;
+        if (end == std::string_view::npos)
+            break;
+        pos = end + 1;
+    }
+    REQUIRE(expected.size() == 65);
+
+    // Parse diagnostics per line (the tree's), and semantic ones (the compilation's).
+    std::map<size_t, std::vector<std::pair<size_t, DiagCode>>> parse, all;
+    for (auto& d : (*tree)->diagnostics())
+        parse[sm.getLineNumber(d.location)].push_back({sm.getColumnNumber(d.location), d.code});
+    for (auto& d : compilation.getAllDiagnostics()) {
+        if (d.isError())
+            all[sm.getLineNumber(d.location)].push_back({sm.getColumnNumber(d.location), d.code});
+    }
+    for (auto& [line, exp] : expected) {
+        INFO("line " << line);
+        auto& [col, kw] = exp;
+        if (kw) {
+            // A reserved word in a declarator position: a syntax error on that line.
+            CHECK(parse.contains(line));
+        }
+        else {
+            // `int assert;` is syntactically fine in VAMS (neither word is reserved); it fails
+            // only because `int` is not a type in Verilog-AMS.
+            CHECK(!parse.contains(line));
+            REQUIRE(all.contains(line));
+            CHECK(all[line][0] == std::pair<size_t, DiagCode>{3, diag::UndeclaredIdentifier});
+        }
+    }
+}

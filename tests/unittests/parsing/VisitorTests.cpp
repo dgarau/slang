@@ -1490,7 +1490,8 @@ TEST_CASE("Visit all file") {
     flat_hash_set<StatementKind> stmtKinds = {StatementKind::Invalid,
                                               StatementKind::Contribution}; // SVMake VAMS
     flat_hash_set<AssertionExprKind> assertionExprKinds = {AssertionExprKind::Invalid};
-    flat_hash_set<TimingControlKind> timingControlKinds = {TimingControlKind::Invalid};
+    flat_hash_set<TimingControlKind> timingControlKinds = {
+        TimingControlKind::Invalid, TimingControlKind::AnalogEvent}; // SVMake VAMS
     flat_hash_set<ConstraintKind> constraintKinds = {ConstraintKind::Invalid};
     flat_hash_set<PatternKind> patternKinds = {PatternKind::Invalid};
     flat_hash_set<BinsSelectExprKind> binsSelectKinds = {BinsSelectExprKind::Invalid};

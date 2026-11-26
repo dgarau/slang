@@ -775,6 +775,11 @@ Statement& ContributionStatement::fromSyntax(Compilation& comp,
         return badStmt(comp, result);
     }
 
+    if (context.flags.has(ASTFlags::AnalogEvent)) {
+        context.addDiag(diag::ContributionInEventStatement, syntax.op.range());
+        return badStmt(comp, result);
+    }
+
     // analog initial takes an analog_function_statement, which has no contributions.
     if (context.flags.has(ASTFlags::AnalogInitial)) {
         context.addDiag(diag::ContributionInAnalogInitial, syntax.op.range());

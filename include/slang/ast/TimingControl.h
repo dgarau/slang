@@ -15,6 +15,7 @@ namespace slang::ast {
 
 class ASTContext;
 class ASTSerializer;
+class CallExpression;
 enum class EdgeKind : int;
 
 // clang-format off
@@ -28,7 +29,8 @@ enum class EdgeKind : int;
     x(Delay3) \
     x(OneStepDelay) \
     x(CycleDelay) \
-    x(BlockEventList)
+    x(BlockEventList) \
+    x(AnalogEvent)
 SLANG_ENUM(TimingControlKind, CONTROL)
 #undef CONTROL
 // clang-format on
@@ -376,6 +378,44 @@ public:
 
     bool isEquivalentImpl(const BlockEventListControl& rhs) const;
     void serializeTo(ASTSerializer& serializer) const;
+};
+
+/// SVMake VAMS P0.1: a Verilog-AMS analog event (VAMS-2023 5.10): `@(initial_step)`,
+/// `@(final_step("tran"))`, `@(cross(expr, dir, ...))`, in an analog block, or for cross()
+/// also in a digital procedural block (A2D, 7.3.4).
+class SLANG_EXPORT AnalogEventControl final : public TimingControl {
+public:
+    /// InitialStep, FinalStep or Cross (above/timer/absdelta are P1).
+    AnalogBuiltinKind eventKind;
+
+    /// The event function's arguments (cross: expr, dir, time_tol, expr_tol, enable);
+    /// null for an omitted argument.
+    std::span<const Expression* const> args;
+
+    /// The analysis names of initial_step / final_step; empty means every analysis.
+    std::span<const std::string_view> analyses;
+
+    AnalogEventControl(AnalogBuiltinKind eventKind, std::span<const Expression* const> args,
+                       std::span<const std::string_view> analyses, SourceRange sourceRange) :
+        TimingControl(TimingControlKind::AnalogEvent, sourceRange), eventKind(eventKind),
+        args(args), analyses(analyses) {}
+
+    static TimingControl& fromCall(Compilation& compilation, const CallExpression& call,
+                                   EdgeKind edge, const Expression* iffCondition,
+                                   const ASTContext& context, SourceRange sourceRange);
+
+    bool isEquivalentImpl(const AnalogEventControl& rhs) const;
+    void serializeTo(ASTSerializer& serializer) const;
+
+    static bool isKind(TimingControlKind kind) { return kind == TimingControlKind::AnalogEvent; }
+
+    template<typename TVisitor>
+    void visitExprs(TVisitor&& visitor) const {
+        for (auto arg : args) {
+            if (arg)
+                arg->visit(visitor);
+        }
+    }
 };
 
 } // namespace slang::ast
