@@ -8,6 +8,8 @@
 #include "slang/ast/symbols/VariableSymbols.h"
 
 #include "slang/ast/symbols/AnalogSymbols.h"
+#include "slang/ast/Lookup.h"
+#include "slang/diagnostics/VamsDiags.h"
 
 #include "slang/ast/ASTContext.h"
 #include "slang/ast/ASTSerializer.h"
@@ -440,11 +442,24 @@ void NetSymbol::fromSyntax(const Scope& scope, const NetDeclarationSyntax& synta
             break;
     }
 
+    // SVMake VAMS P0.1: `wire electrical a;` (a net type with a discipline, VAMS-2023 3.6.3) is P1.
+    const DataTypeSyntax* typeSyntax = syntax.type;
+    if (typeSyntax->kind == SyntaxKind::NamedType &&
+        typeSyntax->as<NamedTypeSyntax>().name->kind == SyntaxKind::IdentifierName &&
+        isVamsScope(scope)) {
+        auto name = typeSyntax->as<NamedTypeSyntax>().name->as<IdentifierNameSyntax>().identifier;
+        if (comp.getDiscipline(name.valueText()) && !Lookup::unqualified(scope, name.valueText())) {
+            scope.addDiag(diag::VamsNotSupported, name.range())
+                << "net declarations with both a net type and a discipline"sv;
+            typeSyntax = &comp.createEmptyTypeSyntax(name.location());
+        }
+    }
+
     for (auto declarator : syntax.declarators) {
         auto net = comp.emplace<NetSymbol>(declarator->name.valueText(),
                                            declarator->name.location(), netType);
         net->expansionHint = expansionHint;
-        net->setDeclaredType(*syntax.type);
+        net->setDeclaredType(*typeSyntax);
         net->setFromDeclarator(*declarator);
         net->setAttributes(scope, syntax.attributes);
         results.push_back(net);

@@ -337,6 +337,7 @@ module m;
     branch (a, mg) mismatch;
     branch (v) vec;
     branch (<a>) portb;
+    branch (m.a) hier;
 endmodule
 )");
     Compilation compilation;
@@ -344,6 +345,7 @@ endmodule
     auto c = codes(compilation);
     std::ranges::sort(c, [](DiagCode x, DiagCode y) { return x.getCode() < y.getCode(); });
     std::vector<DiagCode> expected{diag::VamsNotSupported,          diag::VamsNotSupported,
+                                   diag::VamsNotSupported,
                                    diag::BranchTerminalNotNet,      diag::BranchTerminalNoDiscipline,
                                    diag::BranchDisciplineMismatch, diag::BranchSameTerminal};
     std::ranges::sort(expected, [](DiagCode x, DiagCode y) { return x.getCode() < y.getCode(); });
@@ -833,6 +835,36 @@ TEST_CASE("VAMS P0.5 fixtures compile clean") {
         compilation.addSyntaxTree(*tree);
         NO_COMPILATION_ERRORS;
 
+        // The whole design serializes, and a default visitor reaches every VAMS node kind.
+        JsonWriter writer;
+        ASTSerializer serializer(compilation, writer);
+        serializer.serialize(compilation.getRoot());
+        CHECK(!writer.view().empty());
+
+        std::set<std::string_view> seen;
+        compilation.getRoot().visit(makeVisitor(
+            [&](auto& v, const AnalogBlockSymbol& s) {
+                seen.insert("AnalogBlock");
+                v.visitDefault(s);
+            },
+            [&](auto& v, const ContributionStatement& s) {
+                seen.insert("Contribution");
+                v.visitDefault(s);
+            },
+            [&](auto& v, const BranchAccessExpression& e) {
+                seen.insert("BranchAccess");
+                v.visitDefault(e);
+            },
+            [&](auto& v, const NetSymbol& n) {
+                if (n.discipline)
+                    seen.insert("DisciplineNet");
+                if (n.isGround)
+                    seen.insert("Ground");
+                v.visitDefault(n);
+            }));
+        for (auto k : {"AnalogBlock", "Contribution", "BranchAccess", "DisciplineNet", "Ground"})
+            CHECK(seen.contains(k));
+
         // The analysis pass (drivers, multi-driver, unused) must accept the analog design.
         compilation.freeze();
         analysis::AnalysisManager analysis;
@@ -935,4 +967,70 @@ TEST_CASE("VAMS t_vams_kwd_bad: every VAMS-2.3 keyword line is a syntax error") 
             CHECK(all[line][0] == std::pair<size_t, DiagCode>{3, diag::UndeclaredIdentifier});
         }
     }
+}
+
+
+TEST_CASE("VAMS t_vams_kwd_bad words one at a time") {
+    // Each `int <word>;` alone in a module under VAMS-2.3: a syntax error exactly when the word
+    // is reserved (independent of the tables), so no line hides behind another's recovery.
+    for (auto word : {"above", "abs", "absdelay", "abstol", "ac_stim", "access", "acos", "acosh",
+                      "aliasparam", "analog", "analysis", "branch", "connect", "connectmodule",
+                      "connectrules", "continuous", "cross", "ddt", "ddt_nature", "ddx",
+                      "discipline", "discrete", "domain", "driver_update", "endconnectrules",
+                      "enddiscipline", "endnature", "endparamset", "exclude", "final_step",
+                      "flicker_noise", "flow", "from", "ground", "idt", "idt_nature", "idtmod",
+                      "inf", "initial_step", "laplace_nd", "laplace_np", "laplace_zd",
+                      "laplace_zp", "last_crossing", "limexp", "max", "merged", "min", "nature",
+                      "net_resolution", "noise_table", "paramset", "potential", "resolveto",
+                      "slew", "split", "timer", "transition", "units", "white_noise", "zi_nd",
+                      "zi_np", "zi_zd", "zi_zp", "assert"}) {
+        INFO(word);
+        auto tree = SyntaxTree::fromText("`begin_keywords \"VAMS-2.3\"\nmodule t;\n  int " +
+                                         std::string(word) + ";\nendmodule\n");
+        bool reserved = std::string_view(word) != "assert";
+        CHECK(tree->diagnostics().empty() == !reserved);
+    }
+}
+
+TEST_CASE("VAMS P1 forms are reported, not silently accepted") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical a = 5.0;
+    wire electrical b;
+endmodule
+module ansi(inout electrical p);
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    auto c = codes(compilation);
+    // ANSI discipline ports are P1: today the port type `electrical` is an unknown type.
+    CHECK(c == std::vector<DiagCode>{diag::VamsNotSupported, diag::VamsNotSupported,
+                                     diag::UndeclaredIdentifier});
+
+    // Misuse of the new expression kinds is diagnosed, not asserted.
+    auto t2 = vamsTree(R"(
+`include "disciplines.vams"
+module n;
+    electrical a;
+    real r;
+    parameter real p = V(a);
+    analog V(a) = 1.0;
+    analog r = V(a, a);
+endmodule
+)");
+    Compilation c2;
+    c2.addSyntaxTree(t2);
+    CHECK(codes(c2).size() == 3);
+
+    auto t3 = vamsTree(R"(
+`include "disciplines.vams"
+`default_nettype none
+module k; electrical a; analog V(a) <+ 1.0; endmodule
+)");
+    Compilation c3;
+    c3.addSyntaxTree(t3);
+    auto d3 = c3.getAllDiagnostics();
+    CHECK(d3.empty());
 }

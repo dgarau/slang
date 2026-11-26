@@ -1482,8 +1482,19 @@ NetSymbol* Scope::createDisciplineNet(const DisciplineSymbol& discipline,
         net->setDeclaredType(typeSyntax.as<ImplicitTypeSyntax>());
     else
         net->setDeclaredType(compilation.createEmptyTypeSyntax(decl.name.location()));
-    net->setFromDeclarator(decl);
     net->discipline = &discipline;
+
+    // Nodeset initializers (`electrical a = 5.0;`, 3.6.3.2) are P1: reported, and not bound
+    // as a digital initializer.
+    if (decl.initializer) {
+        addDiag(diag::VamsNotSupported, decl.initializer->sourceRange())
+            << "net discipline initializers (nodesets)"sv;
+        net->setSyntax(decl);
+        net->getDeclaredType()->setDimensionSyntax(decl.dimensions);
+    }
+    else {
+        net->setFromDeclarator(decl);
+    }
     return net;
 }
 
