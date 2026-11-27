@@ -1235,6 +1235,16 @@ const SystemSubroutine* Compilation::getVamsSystemFunction(std::string_view name
     return it == map.end() ? nullptr : it->second.get();
 }
 
+std::span<const VariableSymbol* const> Compilation::getVamsA2DVariables(const Scope& scope) const {
+    if (auto it = vamsA2DVariables.find(&scope); it != vamsA2DVariables.end())
+        return it->second;
+    return {};
+}
+
+void Compilation::addVamsA2DVariable(const Scope& scope, const VariableSymbol& var) {
+    vamsA2DVariables[&scope].push_back(&var);
+}
+
 bool Compilation::isAccessName(std::string_view name) const {
     for (auto nature : natureList) {
         if (nature->getAccessName() == name)

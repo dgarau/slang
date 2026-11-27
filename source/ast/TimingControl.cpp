@@ -384,8 +384,10 @@ TimingControl& SignalEventControl::fromSyntax(Compilation& compilation,
 static TimingControl& cloneClockingEvent(Compilation& comp, const TimingControl& timing) {
     if (timing.kind == TimingControlKind::SignalEvent) {
         auto& sec = timing.as<SignalEventControl>();
-        return *comp.emplace<SignalEventControl>(sec.edge, sec.expr, sec.iffCondition,
-                                                 sec.sourceRange);
+        auto result = comp.emplace<SignalEventControl>(sec.edge, sec.expr, sec.iffCondition,
+                                                       sec.sourceRange);
+        result->analogEvent = sec.analogEvent; // SVMake VAMS P0.4 C6
+        return *result;
     }
     else if (timing.kind == TimingControlKind::EventList) {
         SmallVector<TimingControl*> events;
@@ -402,6 +404,31 @@ static TimingControl& cloneClockingEvent(Compilation& comp, const TimingControl&
     }
 }
 
+// SVMake VAMS P0.4 C6: the hidden A2D event variable made for this digital-context cross() call
+// (addVamsA2DVariables in BlockSymbols.cpp), in the scope holding the procedural block; null when
+// there is none (a cross() in a task or function body, for one), which keeps today's
+// AnalogEventControl binding.
+static const VariableSymbol* findVamsA2DVariable(const Scope& scope, const CallExpression& call) {
+    const Scope* current = &scope;
+    while (current && current->asSymbol().kind == SymbolKind::StatementBlock)
+        current = current->asSymbol().getParentScope();
+    if (!current)
+        return nullptr;
+
+    for (auto var : scope.getCompilation().getVamsA2DVariables(*current)) {
+        if (var->location == call.sourceRange.start())
+            return var;
+    }
+    return nullptr;
+}
+
+const VariableSymbol* SignalEventControl::getVamsA2DVariable() const {
+    if (!analogEvent)
+        return nullptr;
+    auto sym = expr.getSymbolReference();
+    return sym ? &sym->as<VariableSymbol>() : nullptr;
+}
+
 TimingControl& SignalEventControl::fromExpr(Compilation& compilation, EdgeKind edge,
                                             const Expression& expr, const Expression* iffCondition,
                                             const ASTContext& context, SourceRange sourceRange) {
@@ -412,9 +439,22 @@ TimingControl& SignalEventControl::fromExpr(Compilation& compilation, EdgeKind e
         switch (sub->analogKind) {
             case AnalogBuiltinKind::InitialStep:
             case AnalogBuiltinKind::FinalStep:
-            case AnalogBuiltinKind::Cross:
-                return AnalogEventControl::fromCall(compilation, call, edge, iffCondition, context,
-                                                    sourceRange);
+            case AnalogBuiltinKind::Cross: {
+                auto& analog = AnalogEventControl::fromCall(compilation, call, edge, iffCondition,
+                                                            context, sourceRange);
+                if (sub->analogKind == AnalogBuiltinKind::Cross && !analog.bad() &&
+                    !context.flags.has(ASTFlags::AnalogBlock)) {
+                    if (auto var = findVamsA2DVariable(*context.scope, call)) {
+                        auto& ref = *compilation.emplace<NamedValueExpression>(*var,
+                                                                               call.sourceRange);
+                        auto result = compilation.emplace<SignalEventControl>(
+                            EdgeKind::None, ref, nullptr, sourceRange);
+                        result->analogEvent = &analog.as<AnalogEventControl>();
+                        return *result;
+                    }
+                }
+                return analog;
+            }
             default:
                 break;
         }
@@ -494,6 +534,10 @@ void SignalEventControl::serializeTo(ASTSerializer& serializer) const {
 
     if (iffCondition)
         serializer.write("iff", *iffCondition);
+
+    // SVMake VAMS P0.4 C6: the cross() event of a digital-context A2D control.
+    if (analogEvent)
+        serializer.write("analogEvent", *analogEvent);
 }
 
 static void collectEvents(const ASTContext& context, const SyntaxNode& expr,

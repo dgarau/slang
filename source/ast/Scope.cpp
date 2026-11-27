@@ -896,8 +896,11 @@ void Scope::insertMember(const Symbol* member, const Symbol* at, bool incrementI
     linkMember(member, at, incrementIndex);
 
     // Add to the name map if the symbol has a name and can be looked up
-    // by name in the default namespace.
-    if (!member->name.empty() && canLookupByName(member->kind)) {
+    // by name in the default namespace. SVMake VAMS P0.4 C6: a hidden A2D event variable is
+    // a member but is never visible to name lookup.
+    if (!member->name.empty() && canLookupByName(member->kind) &&
+        !(member->kind == SymbolKind::Variable &&
+          member->as<VariableSymbol>().flags.has(VariableFlags::VamsA2D))) {
         auto pair = nameMap->emplace(member->name, member);
         if (!pair.second)
             handleNameConflict(*member, pair.first->second);

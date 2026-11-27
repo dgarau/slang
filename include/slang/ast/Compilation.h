@@ -49,6 +49,7 @@ class Statement;
 class SubroutineSymbol;
 class Symbol;
 class SystemSubroutine;
+class VariableSymbol;
 struct AssertionInstanceDetails;
 struct ConfigRule;
 struct EnumDeclaration;
@@ -541,6 +542,15 @@ public:
 
     /// SVMake VAMS P0.1: true if some nature names @a name as its access function.
     bool isAccessName(std::string_view name) const;
+
+    /// SVMake VAMS P0.4 C6: the hidden A2D event variables (VariableFlags::VamsA2D) made for the
+    /// digital-context `@(cross(...))` controls of the procedural blocks that are direct members
+    /// of @a scope (an instance body or a generate block), in source order: element n is
+    /// `__vams_a2d_<n>`. Each variable's location is the location of its `cross` call.
+    std::span<const VariableSymbol* const> getVamsA2DVariables(const Scope& scope) const;
+
+    /// SVMake VAMS P0.4 C6: records @a var as the next hidden A2D event variable of @a scope.
+    void addVamsA2DVariable(const Scope& scope, const VariableSymbol& var);
 
     /// SVMake VAMS P0.1: registers a nature or discipline declared in @a unit.
     void addNature(const syntax::NatureDeclarationSyntax& syntax, const Scope& unit);
@@ -1092,6 +1102,9 @@ private:
     flat_hash_map<std::string_view, const DisciplineSymbol*> disciplineMap;
     std::vector<const NatureSymbol*> natureList;
     std::vector<const DisciplineSymbol*> disciplineList;
+
+    // SVMake VAMS P0.4 C6: hidden A2D event variables, per scope, in source order.
+    flat_hash_map<const Scope*, std::vector<const VariableSymbol*>> vamsA2DVariables;
 
     // A list of known system subroutines, indexed via KnownSystemName values.
     std::vector<std::shared_ptr<SystemSubroutine>> systemSubroutines;

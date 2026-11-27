@@ -770,11 +770,17 @@ endmodule
 
     auto& root = compilation.getRoot();
     auto& body = root.lookupName<InstanceSymbol>("m").body;
+    // SVMake VAMS P0.4 C6: a digital cross() binds as a SignalEventControl on a hidden A2D
+    // variable (it was an AnalogEventControl in P0.1).
     int crossInAlways = 0;
     body.visit(makeVisitor([&](auto& v, const ProceduralBlockSymbol& pb) {
-        if (pb.getBody().kind == StatementKind::Timed &&
-            pb.getBody().as<TimedStatement>().timing.kind == TimingControlKind::AnalogEvent) {
-            crossInAlways++;
+        if (pb.getBody().kind == StatementKind::Timed) {
+            auto& timing = pb.getBody().as<TimedStatement>().timing;
+            CHECK(timing.kind != TimingControlKind::AnalogEvent);
+            if (timing.kind == TimingControlKind::SignalEvent &&
+                timing.as<SignalEventControl>().analogEvent) {
+                crossInAlways++;
+            }
         }
         v.visitDefault(pb);
     }));
@@ -1302,4 +1308,235 @@ endmodule
     Compilation compilation;
     compilation.addSyntaxTree(tree);
     CHECK(codes(compilation).empty());
+}
+
+namespace {
+
+// SVMake VAMS P0.4 C6 helpers: the members of @a scope that are hidden A2D variables, and every
+// SignalEventControl under @a scope.
+std::vector<const VariableSymbol*> a2dVars(const Scope& scope) {
+    std::vector<const VariableSymbol*> result;
+    for (auto& member : scope.members()) {
+        if (member.kind == SymbolKind::Variable &&
+            member.as<VariableSymbol>().flags.has(VariableFlags::VamsA2D)) {
+            result.push_back(&member.as<VariableSymbol>());
+        }
+    }
+    return result;
+}
+
+std::vector<const SignalEventControl*> signalEvents(const Symbol& symbol) {
+    std::vector<const SignalEventControl*> result;
+    symbol.visit(makeVisitor([&](auto& v, const SignalEventControl& ev) {
+        result.push_back(&ev);
+        v.visitDefault(ev);
+    }));
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("VAMS P0.4 C6: a digital @(cross) is a signal event on a hidden A2D variable") {
+    // The leading form and the nested form of VAMS-2023 Figure 8-3 (plain, named, with a local
+    // declaration, parenthesized), an event list and an initial: every digital cross() control.
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical in;
+    reg clk = 0;
+    reg q = 1'b0;
+    always @(cross(V(in) - 0.5, +1, 1.0e-12, 1e-6, clk)) q <= ~q;
+    always begin
+        @(cross(V(in) - 0.25, -1)) q = 0;
+    end
+    always begin : blk
+        integer k;
+        @((cross(V(in), 0))) k = 1;
+    end
+    always @(cross(V(in)) or posedge clk) q = 1;
+    initial @(cross(V(in), , 1e-9)) q = 1;
+    real r;
+    analog @(cross(V(in) - 0.5, 1)) r = 1;
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+    auto vars = a2dVars(body);
+    REQUIRE(vars.size() == 5);
+    auto registered = compilation.getVamsA2DVariables(body);
+    REQUIRE(registered.size() == 5);
+    for (size_t i = 0; i < vars.size(); i++) {
+        CHECK(vars[i]->name == "__vams_a2d_" + std::to_string(i));
+        CHECK(registered[i] == vars[i]);
+        CHECK(vars[i]->flags.has(VariableFlags::CompilerGenerated));
+        CHECK(vars[i]->getType().isMatching(compilation.getType(
+            64, IntegralFlags::Unsigned | IntegralFlags::TwoState)));
+        CHECK(vars[i]->getHierarchicalPath() == "m.__vams_a2d_" + std::to_string(i));
+    }
+
+    std::vector<const SignalEventControl*> a2d;
+    for (auto ev : signalEvents(body)) {
+        if (ev->analogEvent)
+            a2d.push_back(ev);
+    }
+    REQUIRE(a2d.size() == 5);
+    for (size_t i = 0; i < a2d.size(); i++) {
+        auto& ev = *a2d[i];
+        CHECK(ev.edge == EdgeKind::None);
+        CHECK(!ev.iffCondition);
+        CHECK(ev.expr.kind == ExpressionKind::NamedValue);
+        CHECK(ev.getVamsA2DVariable() == vars[i]);
+        CHECK(&ev.expr.as<NamedValueExpression>().symbol == vars[i]);
+        CHECK(ev.analogEvent->eventKind == AnalogBuiltinKind::Cross);
+    }
+    // The leading form keeps all five arguments.
+    REQUIRE(a2d[0]->analogEvent->args.size() == 5);
+    CHECK(a2d[0]->analogEvent->args[0]->kind == ExpressionKind::BinaryOp);
+    CHECK(a2d[0]->analogEvent->args[1]->kind == ExpressionKind::UnaryOp);
+    CHECK(a2d[0]->analogEvent->args[4]->kind == ExpressionKind::NamedValue);
+    REQUIRE(a2d[1]->analogEvent->args.size() == 2);
+    REQUIRE(a2d[4]->analogEvent->args.size() == 3);
+    CHECK(a2d[4]->analogEvent->args[1] == nullptr);
+
+    // The nested form: the begin-end body's first statement is the timed statement.
+    int lists = 0;
+    body.visit(makeVisitor([&](auto& v, const EventListControl& list) {
+        lists++;
+        REQUIRE(list.events.size() == 2);
+        CHECK(list.events[0]->as<SignalEventControl>().getVamsA2DVariable() == vars[3]);
+        CHECK(!list.events[1]->as<SignalEventControl>().analogEvent);
+        v.visitDefault(list);
+    }));
+    CHECK(lists == 1);
+
+    // The analog-context cross() is unchanged: still an AnalogEventControl.
+    std::vector<const AnalogEventControl*> analog;
+    body.visit(makeVisitor([&](auto& v, const AnalogEventControl& ev) {
+        analog.push_back(&ev);
+        v.visitDefault(ev);
+    }));
+    REQUIRE(analog.size() == 1);
+    CHECK(analog[0]->eventKind == AnalogBuiltinKind::Cross);
+    REQUIRE(analog[0]->args.size() == 2);
+
+    // The serialized control carries the cross() event.
+    JsonWriter writer;
+    ASTSerializer serializer(compilation, writer);
+    serializer.setIncludeAddresses(false);
+    serializer.serialize(*a2d[1]);
+    CHECK(writer.view().find(R"("symbol":"__vams_a2d_1")") != std::string_view::npos);
+    CHECK(writer.view().find(R"("analogEvent":{"kind":"AnalogEvent","event":"cross")") !=
+          std::string_view::npos);
+}
+
+TEST_CASE("VAMS P0.4 C6: A2D variables are per instance and per generate block") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module det(in);
+    input in;
+    electrical in;
+    reg q = 0;
+    always @(cross(V(in) - 0.5, 1)) q <= ~q;
+    always @(cross(V(in) - 0.5, -1)) q <= ~q;
+endmodule
+module top;
+    electrical a;
+    det u1(a);
+    det u2(a);
+    reg q;
+    for (genvar i = 0; i < 2; i++) begin : g
+        always @(cross(V(a) - i)) q = i;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    auto& u1 = root.lookupName<InstanceSymbol>("top.u1").body;
+    auto& u2 = root.lookupName<InstanceSymbol>("top.u2").body;
+    auto v1 = a2dVars(u1);
+    auto v2 = a2dVars(u2);
+    REQUIRE(v1.size() == 2);
+    REQUIRE(v2.size() == 2);
+    CHECK(v1[0]->getHierarchicalPath() == "top.u1.__vams_a2d_0");
+    CHECK(v1[1]->getHierarchicalPath() == "top.u1.__vams_a2d_1");
+    CHECK(v2[0]->getHierarchicalPath() == "top.u2.__vams_a2d_0");
+    CHECK(v2[1]->getHierarchicalPath() == "top.u2.__vams_a2d_1");
+    CHECK(v1[0] != v2[0]);
+
+    // Each body's controls wait on that body's own variables, whatever the instance cache did.
+    for (auto [body, vars] : {std::pair{&u1, v1}, std::pair{&u2, v2}}) {
+        auto evs = signalEvents(*body);
+        REQUIRE(evs.size() == 2);
+        CHECK(evs[0]->getVamsA2DVariable() == vars[0]);
+        CHECK(evs[1]->getVamsA2DVariable() == vars[1]);
+        REQUIRE(evs[1]->analogEvent);
+        REQUIRE(evs[1]->analogEvent->args.size() == 2);
+    }
+
+    auto& top = root.lookupName<InstanceSymbol>("top").body;
+    CHECK(a2dVars(top).empty());
+    std::vector<const VariableSymbol*> genVars;
+    top.visit(makeVisitor([&](auto& v, const GenerateBlockSymbol& block) {
+        for (auto var : a2dVars(block))
+            genVars.push_back(var);
+        v.visitDefault(block);
+    }));
+    REQUIRE(genVars.size() == 2);
+    CHECK(genVars[0]->getHierarchicalPath() == "top.g[0].__vams_a2d_0");
+    CHECK(genVars[1]->getHierarchicalPath() == "top.g[1].__vams_a2d_0");
+}
+
+TEST_CASE("VAMS P0.4 C6: user code cannot name an A2D variable") {
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module det(in);
+    input in;
+    electrical in;
+    reg q = 0;
+    always @(cross(V(in) - 0.5, 1)) q <= ~q;
+    initial q = __vams_a2d_0;
+endmodule
+module top;
+    electrical a;
+    det u1(a);
+    initial $display(u1.__vams_a2d_0);
+endmodule
+)");
+    Compilation comp1;
+    comp1.addSyntaxTree(tree);
+    CHECK(codes(comp1) ==
+          std::vector<DiagCode>{diag::UndeclaredIdentifier, diag::CouldNotResolveHierarchicalPath});
+
+    {
+        // A user declaration of the same name is the user's own; the hidden one does not collide.
+        auto tree2 = vamsTree(R"(
+    `include "disciplines.vams"
+    module m;
+        electrical in;
+        reg q = 0;
+        reg [63:0] __vams_a2d_0;
+        always @(cross(V(in) - 0.5, 1)) q <= ~q;
+        initial __vams_a2d_0 = 5;
+    endmodule
+    )");
+        Compilation compilation;
+        compilation.addSyntaxTree(tree2);
+        NO_COMPILATION_ERRORS;
+        auto& body = compilation.getRoot().lookupName<InstanceSymbol>("m").body;
+        auto vars = a2dVars(body);
+        REQUIRE(vars.size() == 1);
+        auto user = body.find("__vams_a2d_0");
+        REQUIRE(user);
+        CHECK(user != vars[0]);
+        CHECK(!user->as<VariableSymbol>().flags.has(VariableFlags::VamsA2D));
+        auto evs = signalEvents(body);
+        REQUIRE(evs.size() == 1);
+        CHECK(evs[0]->getVamsA2DVariable() == vars[0]);
+    }
 }

@@ -43,9 +43,16 @@ enum class SLANG_EXPORT VariableFlags : uint16_t {
     CheckerFreeVariable = 1 << 4,
 
     /// The variable is a function port with direction 'ref static'.
-    RefStatic = 1 << 5
+    RefStatic = 1 << 5,
+
+    /// SVMake VAMS P0.4 C6: a hidden A2D event variable (`__vams_a2d_<n>`, `bit [63:0]`) made
+    /// for one digital-context `@(cross(...))` (VAMS-2023 7.3.5, 8.4). It is a member of the
+    /// scope holding the procedural block but is never entered in that scope's name map, so no
+    /// lookup (unqualified, hierarchical, implicit port connection) reaches it. Also
+    /// CompilerGenerated. Recognize it by this flag, never by its name.
+    VamsA2D = 1 << 6
 };
-SLANG_BITMASK(VariableFlags, RefStatic)
+SLANG_BITMASK(VariableFlags, VamsA2D)
 
 /// Represents a variable declaration.
 class SLANG_EXPORT VariableSymbol : public ValueSymbol {

@@ -15,7 +15,9 @@ namespace slang::ast {
 
 class ASTContext;
 class ASTSerializer;
+class AnalogEventControl;
 class CallExpression;
+class VariableSymbol;
 enum class EdgeKind : int;
 
 // clang-format off
@@ -210,10 +212,22 @@ public:
     /// An optional edge (posedge, negedge) of the expression to trigger on.
     EdgeKind edge;
 
+    /// SVMake VAMS P0.4 C6: non-null when this control is a digital-context `@(cross(...))`
+    /// (an A2D event, VAMS-2023 7.3.5, 8.4). Then `expr` is a NamedValueExpression of the hidden
+    /// A2D event variable (VariableFlags::VamsA2D, `bit [63:0]` named `__vams_a2d_<n>`), `edge`
+    /// is None and there is no iff; the mixed-signal host increments the variable once per
+    /// communicated event. This points at the cross() event as bound (Cross, its args expr, dir,
+    /// time_tol, expr_tol, enable). The default AST walk does not descend into it.
+    const AnalogEventControl* analogEvent = nullptr;
+
     SignalEventControl(EdgeKind edge, const Expression& expr, const Expression* iffCondition,
                        SourceRange sourceRange) :
         TimingControl(TimingControlKind::SignalEvent, sourceRange), expr(expr),
         iffCondition(iffCondition), edge(edge) {}
+
+    /// SVMake VAMS P0.4 C6: the hidden A2D event variable this control waits on, or null when
+    /// it is an ordinary signal event.
+    const VariableSymbol* getVamsA2DVariable() const;
 
     static TimingControl& fromSyntax(Compilation& compilation,
                                      const syntax::SignalEventExpressionSyntax& syntax,

@@ -25,6 +25,8 @@
 #include "slang/diagnostics/DeclarationsDiags.h"
 #include "slang/diagnostics/LookupDiags.h"
 #include "slang/syntax/AllSyntax.h"
+#include "slang/syntax/SyntaxVisitor.h"
+#include "slang/util/String.h"
 
 namespace slang::ast {
 
@@ -426,11 +428,51 @@ ProceduralBlockSymbol& ProceduralBlockSymbol::createProceduralBlock(
     return *result;
 }
 
+// SVMake VAMS P0.4 C6: one hidden A2D event variable per `cross(...)` call in a digital
+// procedural block (VAMS-2023 7.3.5, 8.4). The binder turns a digital `@(cross(...))` into a
+// SignalEventControl on it (SignalEventControl::analogEvent). Made here, at scope construction,
+// so every scope that holds the block (each instance body, each generate block) gets its own,
+// numbered in source order whether or not its body is ever bound. `cross` lexes as a keyword
+// (and parses as a system name) only in Verilog-AMS source, so this is VAMS-only by syntax. A
+// cross() that is not a valid digital event control (`posedge cross(...)`, `x = cross(...)`)
+// is an error at binding and leaves its variable unused.
+static void addVamsA2DVariables(Scope& scope, const StatementSyntax& stmtSyntax) {
+    struct Visitor : public SyntaxVisitor<Visitor> {
+        Scope& scope;
+        explicit Visitor(Scope& scope) : scope(scope) {}
+
+        void handle(const InvocationExpressionSyntax& inv) {
+            if (inv.left->kind == SyntaxKind::SystemName &&
+                inv.left->as<SystemNameSyntax>().systemIdentifier.kind ==
+                    TokenKind::CrossKeyword) {
+                auto& comp = scope.getCompilation();
+                auto n = comp.getVamsA2DVariables(scope).size();
+                auto str = std::string("__vams_a2d_") + std::to_string(n);
+                auto name = toStringView(
+                    comp.copyFrom(std::span<const char>(str.data(), str.size())));
+                auto var = comp.emplace<VariableSymbol>(name, inv.sourceRange().start(),
+                                                        VariableLifetime::Static);
+                var->flags |= VariableFlags::CompilerGenerated | VariableFlags::VamsA2D;
+                var->setType(
+                    comp.getType(64, IntegralFlags::Unsigned | IntegralFlags::TwoState));
+                scope.addMember(*var);
+                comp.addVamsA2DVariable(scope, *var);
+            }
+            visitDefault(inv);
+        }
+    };
+
+    Visitor visitor(scope);
+    stmtSyntax.visit(visitor);
+}
+
 ProceduralBlockSymbol& ProceduralBlockSymbol::fromSyntax(Scope& scope,
                                                          const ProceduralBlockSyntax& syntax) {
-    return createProceduralBlock(scope, SemanticFacts::getProceduralBlockKind(syntax.kind),
-                                 syntax.keyword.location(), /* isFromAssertion */ false, syntax,
-                                 *syntax.statement);
+    auto& result = createProceduralBlock(scope, SemanticFacts::getProceduralBlockKind(syntax.kind),
+                                         syntax.keyword.location(), /* isFromAssertion */ false,
+                                         syntax, *syntax.statement);
+    addVamsA2DVariables(scope, *syntax.statement);
+    return result;
 }
 
 ProceduralBlockSymbol& ProceduralBlockSymbol::fromSyntax(
