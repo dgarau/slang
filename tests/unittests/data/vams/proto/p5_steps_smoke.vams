@@ -11,6 +11,9 @@
 module top;
   electrical a, gnd;
   ground gnd;
+  // Two named branches (VAMS 3.12): one unnamed branch would be a single branch whose later flow contribution discards the
+  // retained potential (5.6.1.3 Example 2), leaving V(a) = 0 (PLAN_VAMS_P0_2.md §4.3, Q14).
+  branch (a, gnd) src, load;
 
   analog begin
     @(initial_step)
@@ -23,8 +26,8 @@ module top;
                analysis("static"), analysis("ic"), analysis("tran"), analysis("dc"));
     @(final_step("tran")) $display("final_step(tran)");
     @(final_step("dc")) $display("final_step(dc) MUST NOT PRINT");
-    V(a, gnd) <+ 1.0;
-    I(a, gnd) <+ V(a, gnd) / 1.0e3;
+    V(src) <+ 1.0;
+    I(load) <+ V(load) / 1.0e3;
   end
 
   initial #1000 $finish;
