@@ -7,6 +7,8 @@
 //------------------------------------------------------------------------------
 #include "slang/ast/TimingControl.h"
 
+#include <cmath>
+
 #include "slang/ast/ASTSerializer.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Compilation.h"
@@ -765,10 +767,14 @@ TimingControl& AnalogEventControl::fromCall(Compilation& compilation, const Call
         return badCtrl(compilation, result);
     }
 
+    // 5.10.3.1: dir "shall evaluate to integers"; -1, 0 and +1 select the crossings, and "for any other values of
+    // dir, the cross() function does not generate an event and does not act to control the timestep" -- legal, inert.
     if (kind == AnalogBuiltinKind::Cross && args.size() > 1 && args[1]) {
         if (auto cv = context.tryEval(*args[1]); cv) {
-            auto dir = cv.convertToInt().integer().as<int64_t>();
-            if (!dir || *dir < -1 || *dir > 1) {
+            bool integral = !cv.isReal() || std::trunc(cv.real()) == cv.real();
+            if (integral && !cv.isReal())
+                integral = cv.convertToInt().integer().as<int64_t>().has_value();
+            if (!integral) {
                 context.addDiag(diag::CrossDirectionInvalid, args[1]->sourceRange);
                 return badCtrl(compilation, result);
             }

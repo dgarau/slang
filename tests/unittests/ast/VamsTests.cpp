@@ -758,7 +758,7 @@ module m;
     always @(initial_step) q = 0;
     always @(posedge cross(V(in))) q = 0;
     initial q = initial_step;
-    analog @(cross(V(in), 2)) q = 1;
+    analog @(cross(V(in), 1.5)) q = 1;
 endmodule
 )");
     Compilation compilation;
@@ -1279,4 +1279,27 @@ endclass
     CHECK(compilation.getRoot().lookupName<InstanceSymbol>("sv").getDefinition().isVams);
     auto c = codes(compilation);
     CHECK(std::ranges::count(c, diag::ScaledDelay) == 2);
+}
+
+TEST_CASE("VAMS cross() accepts any integer direction (5.10.3.1, SVMake VAMS P0.4 C0)") {
+    // "For any other values of dir, the cross() function does not generate an event and does not act to control the
+    // timestep": legal, inert. Only a non-integer direction is an error.
+    auto tree = vamsTree(R"(
+`include "disciplines.vams"
+module m;
+    electrical in;
+    reg q = 1'b0;
+    parameter integer d = 5;
+    always @(cross(V(in) - 0.5, 5, 1.0e-12)) q <= ~q;
+    always @(cross(V(in) - 0.5, d)) q <= ~q;
+    real r;
+    analog begin
+        @(cross(V(in), -2)) r = 1;
+        @(cross(V(in), 2.0)) r = 0;
+    end
+endmodule
+)");
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    CHECK(codes(compilation).empty());
 }

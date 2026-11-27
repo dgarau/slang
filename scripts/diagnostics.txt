@@ -1351,7 +1351,7 @@ error ContributionInEventStatement "contribution statements are not allowed in t
 error AnalogEventNotInEventControl "the analog event '{}' can only be used as an event control"
 error AnalogEventInDigital "the analog event '{}' is only allowed in an analog block"
 error AnalogEventArgNotString "the arguments of '{}' must be string literals naming analyses"
-error CrossDirectionInvalid "the direction of cross() must be -1, 0 or +1"
+error CrossDirectionInvalid "the direction of cross() must be an integer"
 error NotAllowedInAnalogInitial "{} is not allowed in an analog initial block"
 error AnalogOperatorInEvent "the analog operator '{}' is not allowed in an event-triggered statement"
 error NestedAnalogEvent "an event control cannot be nested in the statement of an analog event control"
