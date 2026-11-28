@@ -41,11 +41,22 @@ InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
             auto& param_symbol = param->symbol.as<ParameterSymbol>();
             hash_combine(h, param_symbol.getValue().hash());
             hash_combine(h, param_symbol.getType().hash());
+            param_symbol.getType().appendMemberDefaults(memberDefaults);
         }
         else {
-            hash_combine(h, param->symbol.as<TypeParameterSymbol>().targetType.getType().hash());
+            auto& type = param->symbol.as<TypeParameterSymbol>().targetType.getType();
+            hash_combine(h, type.hash());
+            type.appendMemberDefaults(memberDefaults);
         }
     }
+
+    // Two types the comparison below accepts as interchangeable (copies of one declaration,
+    // or identical structs) can still differ in their default member values (7.2.2), which
+    // the body can read at elaboration (13.4.3): those bodies must not be shared (6.22,
+    // 23.10). The defaults are evaluated here rather than in operator==, which runs inside
+    // the cache's insert, where binding an initializer could re-enter it (SVMake K-2445).
+    for (auto value : memberDefaults)
+        hash_combine(h, value ? value->hash() : 0);
 
     for (auto conn : symbol.getPortConnections()) {
         if (conn->port.kind == SymbolKind::InterfacePort) {
@@ -120,6 +131,9 @@ bool InstanceCacheKey::operator==(const InstanceCacheKey& other) const {
                 return false;
         }
     }
+
+    if (!Type::sameMemberDefaults(memberDefaults, other.memberDefaults))
+        return false;
 
     for (size_t i = 0; i < ifaceKeys.size(); i++) {
         auto& l = ifaceKeys[i];

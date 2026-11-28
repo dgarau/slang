@@ -900,6 +900,57 @@ bool Type::isIdenticalStructUnion(const Type& rhs) const {
     return true;
 }
 
+void Type::appendMemberDefaults(std::vector<const ConstantValue*>& results) const {
+    auto& ct = getCanonicalType();
+    if (ct.isUnpackedArray()) {
+        if (auto index = ct.getAssociativeIndexType())
+            index->appendMemberDefaults(results);
+        if (auto elem = ct.getArrayElementType())
+            elem->appendMemberDefaults(results);
+        return;
+    }
+
+    // Packed structs and unions carry no member defaults (7.2.2).
+    if (ct.kind != SymbolKind::UnpackedStructType && ct.kind != SymbolKind::UnpackedUnionType)
+        return;
+
+    auto& comp = ct.as<Scope>().getCompilation();
+    for (auto& field : ct.as<Scope>().membersOfType<FieldSymbol>()) {
+        if (auto init = field.getInitializer()) {
+            EvalContext ctx(field);
+            auto value = init->eval(ctx);
+            results.push_back(value.bad() ? &ConstantValue::Invalid
+                                          : comp.allocConstant(std::move(value)));
+        }
+        else {
+            results.push_back(nullptr);
+        }
+        field.getType().appendMemberDefaults(results);
+    }
+}
+
+bool Type::sameMemberDefaults(std::span<const ConstantValue* const> lhs,
+                              std::span<const ConstantValue* const> rhs) {
+    if (lhs.size() != rhs.size())
+        return false;
+
+    for (size_t i = 0; i < lhs.size(); i++) {
+        auto l = lhs[i];
+        auto r = rhs[i];
+        if (!l || !r) {
+            if (l != r)
+                return false;
+            continue;
+        }
+
+        // isIdentical holds for two bad values; a default that did not evaluate
+        // must never make two types interchangeable.
+        if (l->bad() || r->bad() || !l->isIdentical(*r))
+            return false;
+    }
+    return true;
+}
+
 bitmask<IntegralFlags> Type::getIntegralFlags() const {
     bitmask<IntegralFlags> flags;
     if (!isIntegral())

@@ -7,6 +7,9 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <span>
+#include <vector>
+
 #include "slang/ast/Symbol.h"
 #include "slang/numeric/ConstantValue.h"
 #include "slang/syntax/SyntaxNode.h"
@@ -287,6 +290,21 @@ public:
     /// interchangeable as long as their contents match. Array, struct, and union
     /// types are compared through their element and field types.
     bool isMatchingAcrossElaborations(const Type& rhs) const;
+
+    /// Appends the default member values (7.2.2) reachable from this type, in a fixed walk
+    /// order: for each field of an unpacked struct or union, its initializer's value (nullptr
+    /// when it has none, &ConstantValue::Invalid when it does not evaluate), then the field's
+    /// own type; for an unpacked array, its associative index type, then its element type.
+    /// Two types that match across elaborations, or are identical structs, can still differ
+    /// here, and a body or a specialization can read the difference at elaboration (13.4.3),
+    /// so every key that pairs such types compares these lists (SVMake K-2445). The values
+    /// are evaluated when a key is built, never while a key is compared inside a container.
+    void appendMemberDefaults(std::vector<const ConstantValue*>& results) const;
+
+    /// Compares two lists made by appendMemberDefaults: entries match when both are absent
+    /// or both evaluated to identical values; a value that did not evaluate matches nothing.
+    static bool sameMemberDefaults(std::span<const ConstantValue* const> lhs,
+                                   std::span<const ConstantValue* const> rhs);
 
     /// Gets a combination of flags for integral types; for non-integral types,
     /// this returns all zeros.

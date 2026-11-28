@@ -1146,6 +1146,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
 
     SmallVector<const Symbol*> paramSymbols;
     SmallVector<const ConstantValue*> paramValues;
+    SmallVector<const Type*> paramTypes;
     SmallVector<const Type*> typeParams;
     for (auto& decl : paramDecls) {
         auto& param = paramBuilder.createParam(decl, *classType, instanceLoc);
@@ -1164,6 +1165,7 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
             if (sym.kind == SymbolKind::Parameter) {
                 auto& ps = sym.as<ParameterSymbol>();
                 paramValues.push_back(&ps.getValue(instRange));
+                paramTypes.push_back(&ps.getType());
             }
             else {
                 auto& tps = sym.as<TypeParameterSymbol>();
@@ -1174,7 +1176,8 @@ const Type* GenericClassDefSymbol::getSpecializationImpl(
 
     classType->genericParameters = paramSymbols.copy(comp);
     if (!forceInvalidParams) {
-        detail::ClassSpecializationKey key(paramValues.copy(comp), typeParams.copy(comp));
+        detail::ClassSpecializationKey key(comp, paramValues.copy(comp), paramTypes.copy(comp),
+                                           typeParams.copy(comp));
         if (classType->isUninstantiated) {
             // If we're in an uninstantiated scope we save this specialization
             // in a separate map so that we don't try to elaborate it further
@@ -1241,24 +1244,64 @@ void GenericClassDefSymbol::serializeTo(ASTSerializer& serializer) const {
 
 namespace detail {
 
-ClassSpecializationKey::ClassSpecializationKey(std::span<const ConstantValue* const> paramValues,
+ClassSpecializationKey::ClassSpecializationKey(Compilation& comp,
+                                               std::span<const ConstantValue* const> paramValues,
+                                               std::span<const Type* const> paramTypes,
                                                std::span<const Type* const> typeParams) :
-    paramValues(paramValues), typeParams(typeParams) {
+    paramValues(paramValues), paramTypes(paramTypes), typeParams(typeParams) {
+
+    // The default member values (7.2.2) reachable from every parameter's type: two arguments
+    // that match across elaborations can still differ there, and a specialization can read
+    // them at elaboration (13.4.3). They are evaluated here, outside the specialization map,
+    // because an initializer can itself specialize this class (SVMake K-2470).
+    std::vector<const ConstantValue*> defaults;
+    for (auto type : paramTypes) {
+        if (type)
+            type->appendMemberDefaults(defaults);
+    }
+    for (auto type : typeParams) {
+        if (type)
+            type->appendMemberDefaults(defaults);
+    }
+    memberDefaults = comp.copyFrom(std::span<const ConstantValue* const>(defaults));
 
     // Precompute the hash.
     size_t h = 0;
     for (auto val : paramValues)
         hash_combine(h, val ? val->hash() : 0);
+    for (auto type : paramTypes)
+        hash_combine(h, type ? type->hash() : 0);
     for (auto type : typeParams)
         hash_combine(h, type ? type->hash() : 0);
+    for (auto val : memberDefaults)
+        hash_combine(h, val ? val->hash() : 0);
     savedHash = h;
 }
 
 bool ClassSpecializationKey::operator==(const ClassSpecializationKey& other) const {
     if (savedHash != other.savedHash || paramValues.size() != other.paramValues.size() ||
+        paramTypes.size() != other.paramTypes.size() ||
         typeParams.size() != other.typeParams.size()) {
         return false;
     }
+
+    // A value parameter's type takes part too (8.25 b: "their value types are matching
+    // types"), as in the instance cache key (SVMake K-2470).
+    for (auto lit = paramTypes.begin(), rit = other.paramTypes.begin(); lit != paramTypes.end();
+         lit++, rit++) {
+        const Type* l = *lit;
+        const Type* r = *rit;
+        if (l && r) {
+            if (!l->isMatchingAcrossElaborations(*r))
+                return false;
+        }
+        else if (l != r) {
+            return false;
+        }
+    }
+
+    if (!Type::sameMemberDefaults(memberDefaults, other.memberDefaults))
+        return false;
 
     for (auto lit = paramValues.begin(), rit = other.paramValues.begin(); lit != paramValues.end();
          lit++, rit++) {

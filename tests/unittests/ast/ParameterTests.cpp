@@ -7,6 +7,7 @@
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/InstanceSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
+#include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
 #include "slang/ast/types/Type.h"
 
@@ -2316,4 +2317,309 @@ endmodule
     // narrow it.
     REQUIRE(s2.getCanonicalBody() != nullptr);
     CHECK(s2.getCanonicalBody() == &s0.body);
+}
+
+// SVMake K-2445 / K-2470 / K-2471 / K-2474: a type's default member values (7.2.2) take part in
+// every key that can pair two different types -- the instance cache (a type parameter, a value
+// parameter's type), the virtual interface cache, and the class specialization key -- because a
+// body or a specialization can read them at elaboration (13.4.3). Each instance's own declaration
+// is a unique type (6.22, 23.10), and two specializations are the same only for matching
+// arguments (8.25).
+namespace {
+
+int paramValue(const RootSymbol& root, std::string_view path) {
+    return root.lookupName<ParameterSymbol>(path).getValue().integer().as<int>().value();
+}
+
+bool isShared(const RootSymbol& root, std::string_view path) {
+    return root.lookupName<InstanceSymbol>(path).getCanonicalBody() != nullptr;
+}
+
+} // namespace
+
+TEST_CASE("SVMake K-2445: copies whose member defaults differ are not cached together") {
+    auto tree = SyntaxTree::fromText(R"(
+module show #(type T = int) ();
+    function automatic int dflt(); T t; return t.x; endfunction
+    localparam int D = dflt();
+    int arr [D];
+endmodule
+module wrap #(int TAG = 0, int U = 0) ();
+    typedef struct { int x = TAG + 5; } s_t;
+    show #(.T(s_t)) u ();
+endmodule
+module top;
+    wrap #(.TAG(0)) w0 ();
+    wrap #(.TAG(1)) w1 ();
+    wrap #(.TAG(0), .U(1)) w2 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.w0.u.D") == 5);
+    CHECK(paramValue(root, "top.w1.u.D") == 6);
+    CHECK(paramValue(root, "top.w2.u.D") == 5);
+    CHECK(!isShared(root, "top.w1.u"));
+    CHECK(root.lookupName<VariableSymbol>("top.w1.u.arr").getType().getFixedRange().width() == 6);
+
+    // Copies whose defaults are equal still share (w2's s_t is a copy with x = 5, like w0's).
+    CHECK(isShared(root, "top.w2.u"));
+}
+
+TEST_CASE("SVMake K-2445: a value parameter's type with differing member defaults") {
+    auto tree = SyntaxTree::fromText(R"(
+module show #(parameter P = 0) ();
+    function automatic int dflt(); var type(P) t; return t.x; endfunction
+    localparam int D = dflt();
+endmodule
+module wrap #(int TAG = 0) ();
+    typedef struct { int x = TAG + 5; } s_t;
+    localparam s_t V = '{x: 1};
+    show #(.P(V)) u ();
+endmodule
+module top;
+    wrap #(.TAG(0)) w0 ();
+    wrap #(.TAG(1)) w1 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.w0.u.D") == 5);
+    CHECK(paramValue(root, "top.w1.u.D") == 6);
+    CHECK(!isShared(root, "top.w1.u"));
+}
+
+TEST_CASE("SVMake K-2471: identical structs from two packages whose member defaults differ") {
+    auto tree = SyntaxTree::fromText(R"(
+package pa; typedef struct { int x = 5; } s_t; endpackage
+package pb; typedef struct { int x = 6; } s_t; endpackage
+package pc; typedef struct { int x = 2 + 3; } s_t; endpackage
+package pd; typedef struct { int x = 0; } s_t; endpackage
+package pe; typedef struct { int x; } s_t; endpackage
+module show #(type T = int) ();
+    function automatic int dflt(); T t; return t.x; endfunction
+    localparam int D = dflt();
+endmodule
+module top;
+    show #(.T(pa::s_t)) a ();
+    show #(.T(pb::s_t)) b ();
+    show #(.T(pc::s_t)) c ();
+    show #(.T(pd::s_t)) d ();
+    show #(.T(pe::s_t)) e ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.a.D") == 5);
+    CHECK(paramValue(root, "top.b.D") == 6);
+    CHECK(paramValue(root, "top.c.D") == 5);
+    CHECK(!isShared(root, "top.b"));
+
+    // Equal values written differently still share.
+    CHECK(isShared(root, "top.c"));
+
+    // An absent default against a present one does not share, even when both read 0.
+    CHECK(paramValue(root, "top.d.D") == 0);
+    CHECK(paramValue(root, "top.e.D") == 0);
+    CHECK(!isShared(root, "top.e"));
+}
+
+TEST_CASE("SVMake K-2445: member defaults reached through a field, an element and an index") {
+    auto tree = SyntaxTree::fromText(R"(
+module nest #(type T = int) ();
+    function automatic int dflt(); T t; return t.in.x; endfunction
+    localparam int D = dflt();
+endmodule
+module elem #(type T = int) ();
+    function automatic int dflt(); T t; return t[1].x; endfunction
+    localparam int D = dflt();
+endmodule
+module idx #(type T = int) ();
+    T t;
+endmodule
+module wrap #(int TAG = 0) ();
+    typedef struct { int x = TAG + 5; } s_t;
+    typedef struct { s_t in; } n_t;
+    typedef s_t a_t [2];
+    typedef int i_t [s_t];
+    nest #(.T(n_t)) n ();
+    elem #(.T(a_t)) e ();
+    idx #(.T(i_t)) i ();
+endmodule
+module top;
+    wrap #(.TAG(0)) w0 ();
+    wrap #(.TAG(1)) w1 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.w0.n.D") == 5);
+    CHECK(paramValue(root, "top.w1.n.D") == 6);
+    CHECK(paramValue(root, "top.w0.e.D") == 5);
+    CHECK(paramValue(root, "top.w1.e.D") == 6);
+    CHECK(!isShared(root, "top.w1.n"));
+    CHECK(!isShared(root, "top.w1.e"));
+    CHECK(!isShared(root, "top.w1.i"));
+}
+
+TEST_CASE("SVMake K-2470: class specializations over copies whose member defaults differ") {
+    auto tree = SyntaxTree::fromText(R"(
+class C #(type T = int);
+    static function int d(); T t; return t.x; endfunction
+    localparam int D = d();
+endclass
+class V #(parameter P = 0);
+    static function int d(); var type(P) t; return t.x; endfunction
+    localparam int D = d();
+endclass
+module wrap #(int TAG = 0) ();
+    typedef struct { int x = TAG + 5; } s_t;
+    localparam s_t S = '{x: 1};
+    localparam int R = C#(s_t)::D;
+    localparam int Q = V#(S)::D;
+endmodule
+module top;
+    wrap #(.TAG(0)) w0 ();
+    wrap #(.TAG(1)) w1 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.w0.R") == 5);
+    CHECK(paramValue(root, "top.w1.R") == 6);
+    CHECK(paramValue(root, "top.w0.Q") == 5);
+    CHECK(paramValue(root, "top.w1.Q") == 6);
+}
+
+TEST_CASE("SVMake K-2470: a member default that creates a specialization of the class being keyed") {
+    // The defaults are evaluated when the key is built, outside the specialization map: this
+    // initializer creates C#(int, TAG) while C#(s_t) is being looked up.
+    auto tree = SyntaxTree::fromText(R"(
+class C #(type T = int, int N = 0);
+    localparam int K = N;
+    static T t;
+endclass
+module wrap #(int TAG = 0) ();
+    typedef struct { int x = C#(int, TAG)::K + 5; } s_t;
+    typedef C#(s_t) c_t;
+    localparam int R = C#(int, TAG)::K;
+endmodule
+module top;
+    for (genvar i = 0; i < 3; i++) begin : g
+        wrap #(.TAG(i)) w ();
+    end
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    auto spec = [&](std::string_view path) {
+        auto& body = root.lookupName<InstanceSymbol>(path).body;
+        return &body.find("c_t")->as<TypeAliasType>().targetType.getType().getCanonicalType();
+    };
+    CHECK(paramValue(root, "top.g[2].w.R") == 2);
+    CHECK(spec("top.g[0].w") != spec("top.g[1].w"));
+    CHECK(spec("top.g[1].w") != spec("top.g[2].w"));
+    CHECK(spec("top.g[0].w") != spec("top.g[2].w"));
+}
+
+TEST_CASE("SVMake K-2474: a virtual interface over copies whose member defaults differ") {
+    auto tree = SyntaxTree::fromText(R"(
+interface bus #(type T = int) ();
+    function automatic int dflt(); T t; return t.x; endfunction
+    localparam int D = dflt();
+    T v;
+endinterface
+module wrap #(int TAG = 0) ();
+    typedef struct { int x = TAG + 5; } s_t;
+    bus #(.T(s_t)) b ();
+    virtual bus #(.T(s_t)) vb;
+    initial vb = b;
+endmodule
+module top;
+    wrap #(.TAG(0)) w0 ();
+    wrap #(.TAG(1)) w1 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& root = compilation.getRoot();
+    CHECK(paramValue(root, "top.w0.b.D") == 5);
+    CHECK(paramValue(root, "top.w1.b.D") == 6);
+}
+
+TEST_CASE("SVMake K-2471: member defaults that do not evaluate never make two types interchangeable") {
+    auto tree = SyntaxTree::fromText(R"(
+package pa; int v; typedef struct { int x = v; } s_t; endpackage
+package pb; int v; typedef struct { int x = v; } s_t; endpackage
+module show #(type T = int) ();
+    T t;
+endmodule
+module top;
+    show #(.T(pa::s_t)) a ();
+    show #(.T(pb::s_t)) b ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    CHECK(!compilation.getAllDiagnostics().empty());
+
+    auto& root = compilation.getRoot();
+    CHECK(!isShared(root, "top.b"));
+}
+
+TEST_CASE("SVMake K-2470: class value parameters whose types do not match are two specializations") {
+    // Equal values of two separately declared structs of one layout: 8.25 (b) asks for matching
+    // value types too, so C#(pa::V) and C#(pb::V) are two specializations, while two arguments of
+    // one type are one.
+    auto tree = SyntaxTree::fromText(R"(
+package pa; typedef struct { int x; } s_t; localparam s_t V = '{x: 1}; endpackage
+package pb; typedef struct { int x; } s_t; localparam s_t V = '{x: 1}; endpackage
+class C #(parameter P = 0);
+    localparam string S = $typename(type(P));
+endclass
+module top;
+    typedef C#(pa::V) a_t;
+    typedef C#(pb::V) b_t;
+    typedef C#(pb::V) c_t;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("top").body;
+    auto spec = [&](std::string_view name) {
+        return &body.find(name)->as<TypeAliasType>().targetType.getType().getCanonicalType();
+    };
+    CHECK(spec("a_t") != spec("b_t"));
+    CHECK(spec("b_t") == spec("c_t"));
 }

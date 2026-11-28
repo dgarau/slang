@@ -12,6 +12,10 @@
 #include "slang/util/SmallMap.h"
 #include "slang/util/Util.h"
 
+namespace slang {
+class ConstantValue;
+}
+
 namespace slang::ast {
 
 class InstanceSymbol;
@@ -33,6 +37,10 @@ public:
 private:
     not_null<const InstanceSymbol*> symbol;
     std::vector<std::pair<InstanceCacheKey, const ModportSymbol*>> ifaceKeys;
+
+    // The default member values reachable from the parameters' types (Type::appendMemberDefaults),
+    // evaluated here, outside the cache, so that comparing two keys binds nothing (SVMake K-2445).
+    std::vector<const ConstantValue*> memberDefaults;
     size_t savedHash;
 };
 

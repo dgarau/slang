@@ -225,7 +225,8 @@ namespace detail {
 // when that's the case so it's separated here for now.
 class ClassSpecializationKey {
 public:
-    ClassSpecializationKey(std::span<const ConstantValue* const> paramValues,
+    ClassSpecializationKey(Compilation& comp, std::span<const ConstantValue* const> paramValues,
+                           std::span<const Type* const> paramTypes,
                            std::span<const Type* const> typeParams);
 
     size_t hash() const { return savedHash; }
@@ -234,7 +235,9 @@ public:
 
 private:
     std::span<const ConstantValue* const> paramValues;
+    std::span<const Type* const> paramTypes;
     std::span<const Type* const> typeParams;
+    std::span<const ConstantValue* const> memberDefaults;
     size_t savedHash;
 };
 
