@@ -1927,6 +1927,19 @@ module m;
 endmodule
 ```
 
+-Walways-no-timing
+A general purpose always procedure has no timing control, and calls no task that has one, so
+simulation time cannot advance while it runs. IEEE 1800-2023 9.2.2.1 says such a procedure "will
+create a simulation deadlock condition"; that is a consequence, not a rule the design breaks, so
+this is a warning (on by default) rather than an error. A procedure meant as combinational logic
+is usually written as always_comb or always @*.
+```
+module m;
+    int i;
+    always i = i + 1;
+endmodule
+```
+
 -Wmultiple-always-assigns
 Multiple always_comb/latch/ff blocks assign to the same variable (or longest static
 prefix of a variable). This is not allowed in SystemVerilog.

@@ -4,6 +4,7 @@
 #include "AnalysisTests.h"
 
 #include "slang/analysis/DataFlowAnalysis.h"
+#include "slang/diagnostics/DiagnosticEngine.h"
 
 class TestAnalysis : public AbstractFlowAnalysis<TestAnalysis, int> {
 public:
@@ -1945,4 +1946,38 @@ module t; logic [1:0] s; logic y, z;
   always_comb z = s[0];
 endmodule
 )") == 1);
+}
+
+TEST_CASE("SVMake K-2433: an always procedure without timing control is a default-on warning") {
+    // 9.2.2.1: "If an always procedure has no control for simulation time to advance, it will create
+    // a simulation deadlock condition." A consequence, not a rule the design breaks: a warning in
+    // the default group with its own option, so -Wno-, -Werror= and pragmas reach it.
+    auto& code = R"(
+module t;
+    int n = 0;
+    always n = n + 1;
+endmodule
+)";
+
+    Compilation compilation;
+    AnalysisManager analysisManager;
+    auto diags = analyze(code, compilation, analysisManager);
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == diag::AlwaysWithoutTimingControl);
+    CHECK(!diags[0].isError());
+
+    auto& sm = SyntaxTree::getDefaultSourceManager();
+    DiagnosticEngine engine(sm);
+    CHECK(engine.getOptionName(diag::AlwaysWithoutTimingControl) == "always-no-timing");
+    REQUIRE(engine.findFromOptionName("always-no-timing").size() == 1);
+
+    auto severityWith = [&](std::vector<std::string> options) {
+        DiagnosticEngine e(sm);
+        e.setWarningOptions(options);
+        return e.getSeverity(diag::AlwaysWithoutTimingControl, diags[0].location);
+    };
+    CHECK(severityWith({}) == DiagnosticSeverity::Warning);   // "default" is on unless turned off
+    CHECK(severityWith({"no-unused"}) == DiagnosticSeverity::Warning);
+    CHECK(severityWith({"no-always-no-timing"}) == DiagnosticSeverity::Ignored);
+    CHECK(severityWith({"error=always-no-timing"}) == DiagnosticSeverity::Error);
 }

@@ -1222,7 +1222,6 @@ error NTResolveArgModify "resolution function for nettype '{}' cannot modify its
 error MultipleUWireDrivers "'uwire' net '{}' cannot have multiple drivers"
 error MultipleUDNTDrivers "net '{}' with user-defined nettype '{}' cannot have multiple drivers because it does not specify a resolution function"
 error InputPortAssign "cannot assign to input port '{}'"
-error AlwaysWithoutTimingControl "'always' procedure does not advance time and so will create a simulation deadlock"
 error AssertionLocalUnassigned "cannot reference local variable '{}' because it is unassigned at this point in the sequence"
 error AssertionFormalUnassigned "output formal argument '{}' is not definitely assigned at the end of the sequence"
 error AssertionFormalMultiAssign "cannot bind local variable '{}' to more than one output or inout local variable formal argument"
@@ -1298,6 +1297,7 @@ warning multi-write MultiWriteExpr "'{}' is modified more than once in the same 
 warning read-write ReadWriteExpr "'{}' is both read and modified in the same expression; the order of evaluation is undefined"
 warning mixed-var-assigns MixedVarAssigns "cannot mix continuous and procedural assignments to variable '{}'"
 warning multiple-cont-assigns MultipleContAssigns "cannot have multiple continuous assignments to variable '{}'"
+warning always-no-timing AlwaysWithoutTimingControl "'always' procedure does not advance time and so will create a simulation deadlock"
 warning multiple-always-assigns MultipleAlwaysAssigns "variable '{}' driven by {} procedure cannot be written to by any other process"
 warning fork-loop-var ForkLoopVar "loop variable '{}' is used inside a {} block; all loop iterations will see the same stale value (use an automatic local variable inside the fork to capture the current value)"
 warning loop-var-modify LoopVarModify "loop variable '{}' is modified in both the `for` loop step and the loop body"
@@ -1340,7 +1340,7 @@ group default = { nonstandard-cast-type union-struct-member-default deferred-eve
                   dup-config-rule unused-config-cell unused-config-instance specify-condition-expr
                   seq-no-match case-too-complex nested-solve-before dynamic-non-procedural
                   nonstandard-string-concat nested-comment multi-write read-write mixed-var-assigns
-                  multiple-cont-assigns multiple-always-assigns misplaced-trailing-separator
+                  multiple-cont-assigns multiple-always-assigns always-no-timing misplaced-trailing-separator
                   qualifiers-on-out-of-block member-impl-not-found shift-count-overflow shift-count-negative
                   initializer-required package-import-in-class foreach-call-expr nonstandard-hierarchical-cross
                   nonstandard-inside nonstandard-bare-assoc-pattern literal-leading-underscore ref-arg-automatic
