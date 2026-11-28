@@ -9,6 +9,7 @@
 
 #include <vector>
 
+#include "slang/ast/types/Type.h"
 #include "slang/util/SmallMap.h"
 #include "slang/util/Util.h"
 
@@ -40,7 +41,7 @@ private:
 
     // The default member values reachable from the parameters' types (Type::appendMemberDefaults),
     // evaluated here, outside the cache, so that comparing two keys binds nothing (SVMake K-2445).
-    std::vector<const ConstantValue*> memberDefaults;
+    std::vector<MemberDefault> memberDefaults;
     size_t savedHash;
 };
 

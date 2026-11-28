@@ -900,7 +900,7 @@ bool Type::isIdenticalStructUnion(const Type& rhs) const {
     return true;
 }
 
-void Type::appendMemberDefaults(std::vector<const ConstantValue*>& results) const {
+void Type::appendMemberDefaults(std::vector<MemberDefault>& results) const {
     auto& ct = getCanonicalType();
     if (ct.isUnpackedArray()) {
         if (auto index = ct.getAssociativeIndexType())
@@ -916,36 +916,43 @@ void Type::appendMemberDefaults(std::vector<const ConstantValue*>& results) cons
 
     auto& comp = ct.as<Scope>().getCompilation();
     for (auto& field : ct.as<Scope>().membersOfType<FieldSymbol>()) {
+        MemberDefault entry{&field, nullptr};
         if (auto init = field.getInitializer()) {
             EvalContext ctx(field);
             auto value = init->eval(ctx);
-            results.push_back(value.bad() ? &ConstantValue::Invalid
-                                          : comp.allocConstant(std::move(value)));
+            entry.value = value.bad() ? &ConstantValue::Invalid
+                                      : comp.allocConstant(std::move(value));
         }
-        else {
-            results.push_back(nullptr);
-        }
+        results.push_back(entry);
         field.getType().appendMemberDefaults(results);
     }
 }
 
-bool Type::sameMemberDefaults(std::span<const ConstantValue* const> lhs,
-                              std::span<const ConstantValue* const> rhs) {
+bool Type::sameMemberDefaults(std::span<const MemberDefault> lhs,
+                              std::span<const MemberDefault> rhs) {
     if (lhs.size() != rhs.size())
         return false;
 
     for (size_t i = 0; i < lhs.size(); i++) {
-        auto l = lhs[i];
-        auto r = rhs[i];
+        auto l = lhs[i].value;
+        auto r = rhs[i].value;
         if (!l || !r) {
             if (l != r)
                 return false;
             continue;
         }
 
-        // isIdentical holds for two bad values; a default that did not evaluate
-        // must never make two types interchangeable.
-        if (l->bad() || r->bad() || !l->isIdentical(*r))
+        // isIdentical holds for two bad values, so a default that did not evaluate is
+        // compared by its field instead: the same field's (a key against itself, or two
+        // mentions of one type) matches, and two different types never become
+        // interchangeable through it.
+        if (l->bad() || r->bad()) {
+            if (!l->bad() || !r->bad() || lhs[i].field != rhs[i].field)
+                return false;
+            continue;
+        }
+
+        if (!l->isIdentical(*r))
             return false;
     }
     return true;

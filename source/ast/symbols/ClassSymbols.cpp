@@ -1254,7 +1254,7 @@ ClassSpecializationKey::ClassSpecializationKey(Compilation& comp,
     // that match across elaborations can still differ there, and a specialization can read
     // them at elaboration (13.4.3). They are evaluated here, outside the specialization map,
     // because an initializer can itself specialize this class (SVMake K-2470).
-    std::vector<const ConstantValue*> defaults;
+    std::vector<MemberDefault> defaults;
     for (auto type : paramTypes) {
         if (type)
             type->appendMemberDefaults(defaults);
@@ -1263,18 +1263,19 @@ ClassSpecializationKey::ClassSpecializationKey(Compilation& comp,
         if (type)
             type->appendMemberDefaults(defaults);
     }
-    memberDefaults = comp.copyFrom(std::span<const ConstantValue* const>(defaults));
+    memberDefaults = comp.copyFrom(std::span<const MemberDefault>(defaults));
 
     // Precompute the hash.
     size_t h = 0;
     for (auto val : paramValues)
         hash_combine(h, val ? val->hash() : 0);
-    for (auto type : paramTypes)
-        hash_combine(h, type ? type->hash() : 0);
+    // The value parameters' types are left out of the hash: Type::hash seeds with the type's
+    // own kind, so a typedef and the type it names (which match, 6.22.1) would hash apart and
+    // never reach the comparison below. operator== compares them.
     for (auto type : typeParams)
         hash_combine(h, type ? type->hash() : 0);
-    for (auto val : memberDefaults)
-        hash_combine(h, val ? val->hash() : 0);
+    for (auto& entry : memberDefaults)
+        hash_combine(h, entry.value ? entry.value->hash() : 0);
     savedHash = h;
 }
 

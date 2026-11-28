@@ -2623,3 +2623,67 @@ endmodule
     CHECK(spec("a_t") != spec("b_t"));
     CHECK(spec("b_t") == spec("c_t"));
 }
+
+TEST_CASE("SVMake K-2470: a typedef'd value type and the type it names are one specialization") {
+    // 6.22.1: a typedef matches the type it names, and two fixed arrays of one range and element
+    // type match, so 8.25 (b) gives one specialization; the value types must not split the hash.
+    auto tree = SyntaxTree::fromText(R"(
+class C #(parameter P = 0);
+endclass
+module top;
+    typedef int arr_t [2];
+    localparam arr_t A = '{1, 2};
+    localparam int B [2] = '{1, 2};
+    typedef int q_t [$];
+    localparam q_t Q = '{1};
+    localparam int Q2 [$] = '{1};
+    typedef C#(A) a_t;
+    typedef C#(B) b_t;
+    typedef C#(Q) q1_t;
+    typedef C#(Q2) q2_t;
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    NO_COMPILATION_ERRORS;
+
+    auto& body = compilation.getRoot().lookupName<InstanceSymbol>("top").body;
+    auto spec = [&](std::string_view name) {
+        return &body.find(name)->as<TypeAliasType>().targetType.getType().getCanonicalType();
+    };
+    CHECK(spec("a_t") == spec("b_t"));
+    CHECK(spec("q1_t") == spec("q2_t"));
+}
+
+TEST_CASE("SVMake K-2471: a default that does not evaluate still lets a key equal itself") {
+    // Two mentions of one type are one specialization and one cached body, even when a member
+    // default is in error: Invalid matches Invalid from the same field.
+    auto tree = SyntaxTree::fromText(R"(
+class C #(type T = int);
+endclass
+module show #(type T = int) ();
+    T t;
+endmodule
+module top;
+    int v;
+    typedef struct { int x = v; } s_t;
+    typedef C#(s_t) a_t;
+    typedef C#(s_t) b_t;
+    show #(.T(s_t)) u0 ();
+    show #(.T(s_t)) u1 ();
+endmodule
+)");
+
+    Compilation compilation;
+    compilation.addSyntaxTree(tree);
+    CHECK(!compilation.getAllDiagnostics().empty());
+
+    auto& root = compilation.getRoot();
+    auto& body = root.lookupName<InstanceSymbol>("top").body;
+    auto spec = [&](std::string_view name) {
+        return &body.find(name)->as<TypeAliasType>().targetType.getType().getCanonicalType();
+    };
+    CHECK(spec("a_t") == spec("b_t"));
+    CHECK(isShared(root, "top.u1"));
+}

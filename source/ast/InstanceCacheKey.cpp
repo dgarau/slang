@@ -55,8 +55,8 @@ InstanceCacheKey::InstanceCacheKey(const InstanceSymbol& symbol, bool& valid,
     // the body can read at elaboration (13.4.3): those bodies must not be shared (6.22,
     // 23.10). The defaults are evaluated here rather than in operator==, which runs inside
     // the cache's insert, where binding an initializer could re-enter it (SVMake K-2445).
-    for (auto value : memberDefaults)
-        hash_combine(h, value ? value->hash() : 0);
+    for (auto& entry : memberDefaults)
+        hash_combine(h, entry.value ? entry.value->hash() : 0);
 
     for (auto conn : symbol.getPortConnections()) {
         if (conn->port.kind == SymbolKind::InterfacePort) {

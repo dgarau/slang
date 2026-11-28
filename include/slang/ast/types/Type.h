@@ -20,6 +20,14 @@ namespace slang::ast {
 class Compilation;
 class EvalContext;
 class TypeProvider;
+
+/// One default member value (7.2.2) found by Type::appendMemberDefaults: the field it belongs to
+/// and its value -- nullptr when the field has no initializer, &ConstantValue::Invalid when the
+/// initializer does not evaluate.
+struct MemberDefault {
+    const Symbol* field = nullptr;
+    const ConstantValue* value = nullptr;
+};
 struct LookupResult;
 enum class RandMode;
 
@@ -292,19 +300,20 @@ public:
     bool isMatchingAcrossElaborations(const Type& rhs) const;
 
     /// Appends the default member values (7.2.2) reachable from this type, in a fixed walk
-    /// order: for each field of an unpacked struct or union, its initializer's value (nullptr
-    /// when it has none, &ConstantValue::Invalid when it does not evaluate), then the field's
-    /// own type; for an unpacked array, its associative index type, then its element type.
+    /// order: for each field of an unpacked struct or union, the field and its initializer's
+    /// value (see MemberDefault), then the field's own type; for an unpacked array, its
+    /// associative index type, then its element type.
     /// Two types that match across elaborations, or are identical structs, can still differ
     /// here, and a body or a specialization can read the difference at elaboration (13.4.3),
     /// so every key that pairs such types compares these lists (SVMake K-2445). The values
     /// are evaluated when a key is built, never while a key is compared inside a container.
-    void appendMemberDefaults(std::vector<const ConstantValue*>& results) const;
+    void appendMemberDefaults(std::vector<MemberDefault>& results) const;
 
-    /// Compares two lists made by appendMemberDefaults: entries match when both are absent
-    /// or both evaluated to identical values; a value that did not evaluate matches nothing.
-    static bool sameMemberDefaults(std::span<const ConstantValue* const> lhs,
-                                   std::span<const ConstantValue* const> rhs);
+    /// Compares two lists made by appendMemberDefaults: entries match when both are absent or
+    /// both evaluated to identical values. A value that did not evaluate matches only the same
+    /// field's (so a key still equals itself), never another type's.
+    static bool sameMemberDefaults(std::span<const MemberDefault> lhs,
+                                   std::span<const MemberDefault> rhs);
 
     /// Gets a combination of flags for integral types; for non-integral types,
     /// this returns all zeros.

@@ -237,7 +237,7 @@ private:
     std::span<const ConstantValue* const> paramValues;
     std::span<const Type* const> paramTypes;
     std::span<const Type* const> typeParams;
-    std::span<const ConstantValue* const> memberDefaults;
+    std::span<const MemberDefault> memberDefaults;
     size_t savedHash;
 };
 
