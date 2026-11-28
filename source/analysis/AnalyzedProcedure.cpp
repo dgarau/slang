@@ -26,8 +26,14 @@ AnalyzedProcedure::AnalyzedProcedure(const Symbol& analyzedSymbol,
 }
 
 AnalyzedProcedure::AnalyzedProcedure(AnalysisContext& context, const Symbol& analyzedSymbol,
-                                     const AnalyzedProcedure* parentProcedure, DFAResults& dfa) :
+                                     const AnalyzedProcedure* parentProcedure, DFAResults& dfa,
+                                     const DFAResults* flowResults) :
     analyzedSymbol(&analyzedSymbol), parentProcedure(parentProcedure) {
+
+    // The joined-flow-state checks below read the flow-only pass when there is one
+    // (AnalysisManager::analyzeProcedure, SVMake K-2437); every reference, driver and
+    // other diagnostic comes from `dfa`.
+    const DFAResults& flow = flowResults ? *flowResults : dfa;
 
     std::optional<ProceduralBlockKind> procKind;
     if (auto proc = analyzedSymbol.as_if<ProceduralBlockSymbol>())
@@ -134,14 +140,14 @@ AnalyzedProcedure::AnalyzedProcedure(AnalysisContext& context, const Symbol& ana
 
             if (procKind == ProceduralBlockKind::AlwaysComb) {
                 // Check for partially assigned variables, which infer latches.
-                dfa.visitPartiallyAssigned(/* skipAutomatic */ true,
+                flow.visitPartiallyAssigned(/* skipAutomatic */ true,
                                            [&](const Symbol&, const Expression& expr) {
                                                reportInferredDiag(diag::InferredLatch, expr);
                                            });
             }
             else if (procKind == ProceduralBlockKind::AlwaysLatch) {
                 // Check for definitely assigned variables, which infer comb logic.
-                dfa.visitDefinitelyAssigned(/* skipAutomatic */ true,
+                flow.visitDefinitelyAssigned(/* skipAutomatic */ true,
                                             [&](const Symbol&, const Expression& expr) {
                                                 reportInferredDiag(diag::InferredComb, expr);
                                             });
@@ -152,14 +158,14 @@ AnalyzedProcedure::AnalyzedProcedure(AnalysisContext& context, const Symbol& ana
         // Diagnose missing return statements and/or incomplete
         // assignments to the return value var.
         auto& subroutine = analyzedSymbol.as<SubroutineSymbol>();
-        if (dfa.endIsReachable && subroutine.subroutineKind == SubroutineKind::Function &&
+        if (flow.endIsReachable && subroutine.subroutineKind == SubroutineKind::Function &&
             !subroutine.getReturnType().isVoid() && !subroutine.name.empty() &&
             subroutine.returnValVar) {
 
             // Control falls off the end of a non-void function but that is
             // fine if the return value var is definitely assigned here.
-            if (!dfa.isDefinitelyAssigned(*subroutine.returnValVar)) {
-                if (dfa.hasReturnStatements || dfa.isReferenced(*subroutine.returnValVar)) {
+            if (!flow.isDefinitelyAssigned(*subroutine.returnValVar)) {
+                if (flow.hasReturnStatements || flow.isReferenced(*subroutine.returnValVar)) {
                     context.addDiag(subroutine, diag::IncompleteReturn, subroutine.location)
                         << subroutine.name;
                 }

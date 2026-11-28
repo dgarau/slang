@@ -93,8 +93,13 @@ public:
     AnalyzedProcedure(const ast::Symbol& symbol, const AnalyzedProcedure* parentProcedure);
 
     /// Constructs a new AnalyzedProcedure object.
+    ///
+    /// If @a flowResults is given, the checks derived from the joined flow state
+    /// (inferred latches and combinational logic, missing and incomplete returns)
+    /// read it instead of @a analysis; everything else reads @a analysis (SVMake K-2437).
     AnalyzedProcedure(AnalysisContext& context, const ast::Symbol& symbol,
-                      const AnalyzedProcedure* parentProcedure, DFAResults& analysis);
+                      const AnalyzedProcedure* parentProcedure, DFAResults& analysis,
+                      const DFAResults* flowResults = nullptr);
 
     /// Returns the inferred clocking block for the procedure, if available.
     ///

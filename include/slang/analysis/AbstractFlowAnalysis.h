@@ -31,6 +31,12 @@ public:
     /// Set to true if the analysis detected an error.
     bool bad = false;
 
+    /// Set to true if the analysis visited a unique or priority case statement whose
+    /// items are not proven to cover its input, so that AnalysisFlags::FullCaseUniquePriority
+    /// (which assumes they do) would change the flow through it. The AnalysisManager
+    /// uses this to decide whether the flow-only pass is needed (SVMake K-2437).
+    bool fcupWouldAssume = false;
+
     /// Gets an evaluation context for use during analysis.
     EvalContext& getEvalContext() const { return evalContext; }
 
@@ -374,6 +380,10 @@ protected:
         // Determine whether the case statement has full coverage of all possible
         // inputs, such that we're guaranteed to select one of the case items.
         const bool covered = isFullyCovered(stmt, knownBranch, isKnown);
+        if (!covered && (stmt.check == UniquePriorityCheck::Unique ||
+                         stmt.check == UniquePriorityCheck::Priority)) {
+            fcupWouldAssume = true;
+        }
 
         if (stmt.defaultCase) {
             // If the case input is fully covered by item expressions,

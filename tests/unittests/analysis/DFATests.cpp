@@ -1583,3 +1583,366 @@ endmodule
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == diag::InferredLatch);   // y: the constant P may not match; z is always assigned
 }
+
+namespace {
+
+// SVMake K-2437 helpers: analyze `code` with or without FullCaseUniquePriority and return the
+// sorted analysis diagnostic codes, the driver counts of the named variables, and the stats.
+struct FcupRun {
+    std::vector<std::string> codes;
+    std::vector<size_t> drivers;
+    AnalysisManager::Stats stats;
+};
+
+FcupRun fcupRun(const std::string& code, bool fcup, std::initializer_list<std::string_view> vars) {
+    AnalysisOptions options;
+    if (fcup)
+        options.flags |= AnalysisFlags::FullCaseUniquePriority;
+
+    Compilation compilation;
+    AnalysisManager analysisManager(options);
+    auto diags = analyze(code, compilation, analysisManager);
+
+    FcupRun result;
+    for (auto& d : diags)
+        result.codes.emplace_back(toString(d.code));
+    std::ranges::sort(result.codes);
+
+    // Walk the instance path with Scope::find (the compilation is frozen: no lookups that allocate).
+    for (auto name : vars) {
+        const Scope* scope = nullptr;
+        const Symbol* sym = nullptr;
+        size_t start = 0;
+        while (true) {
+            auto dot = name.find('.', start);
+            auto part = name.substr(start, dot == std::string_view::npos ? dot : dot - start);
+            if (!scope) {
+                for (auto inst : compilation.getRoot().topInstances) {
+                    if (inst->name == part)
+                        sym = inst;
+                }
+            }
+            else {
+                sym = scope->find(part);
+            }
+            REQUIRE(sym);
+            if (dot == std::string_view::npos)
+                break;
+            scope = &sym->as<InstanceSymbol>().body;
+            start = dot + 1;
+        }
+        result.drivers.push_back(analysisManager.getDrivers(sym->as<ValueSymbol>()).size());
+    }
+    result.stats = analysisManager.getStats();
+    return result;
+}
+
+std::vector<std::string> sortedCodes(std::initializer_list<std::string> codes) {
+    std::vector<std::string> v(codes);
+    std::ranges::sort(v);
+    return v;
+}
+
+} // namespace
+
+TEST_CASE("SVMake K-2437: FullCaseUniquePriority keeps the drivers and references of the code it assumes is not run") {
+    // 12.5: "If all comparisons fail and the default item is given, then the default item statement
+    // shall be executed"; FullCaseUniquePriority is an optimisation hint, not a proof that an arm is
+    // dead. 9.2.2.2: an always_comb's variables "shall not be assigned by any other process";
+    // 23.3.3.2: "Assignments to variables declared as input ports shall be illegal". With the flag,
+    // each design below gives the FCUP-off drivers and driver diagnostics; the joined-flow codes
+    // (InferredLatch, IncompleteReturn) stay what the flag gives.
+    struct Case {
+        const char* name;
+        std::string code;
+        std::initializer_list<std::string_view> vars;
+        std::vector<std::string> on, off;
+    };
+    const Case cases[] = {
+        {"fc2: a default-only writer that an initial also writes", R"(
+module t;
+  logic [1:0] s; logic a, b, y; int i;
+  always_comb begin
+    unique case (s)
+      2'd0: y = a;
+      2'd1: y = b;
+      default: begin y = (a == a); i = i++ + i++; end
+    endcase
+  end
+  initial begin s = 0; a = 1; b = 0; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns", "MultiWriteExpr"}),
+         sortedCodes({"MultipleAlwaysAssigns", "MultiWriteExpr", "InferredLatch"})},
+        {"fc_pri: the same with priority", R"(
+module t;
+  logic [1:0] s; logic a, b, y; int i;
+  always_comb begin
+    priority case (s)
+      2'd0: y = a;
+      2'd1: y = b;
+      default: begin y = 1'b0; i = 1; end
+    endcase
+  end
+  initial begin s = 0; a = 1; b = 0; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns", "InferredLatch"})},
+        {"ip1: an input var port written in the default arm", R"(
+module c(input var logic i, input logic [1:0] s, output logic y);
+  always_comb unique case (s) 2'd0: y = 1; 2'd1: y = 0; default: begin i = 0; y = i; end endcase
+endmodule
+module t; logic a = 1, y; logic [1:0] s = 0; c u(.i(a), .s(s), .y(y)); endmodule
+)",
+         {"t.u.i"},
+         sortedCodes({"InputPortAssign"}),
+         sortedCodes({"InputPortAssign", "InferredLatch"})},
+        {"fc3: a multi-write in the default arm", R"(
+module t;
+  logic [1:0] s; logic a, b, y; int i;
+  always_comb begin
+    unique case (s)
+      2'd0: y = a;
+      2'd1: y = b;
+      default: begin y = 1'b0; i = i++ + i++; end
+    endcase
+  end
+  initial begin s = 0; a = 1; b = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultiWriteExpr"}),
+         sortedCodes({"MultiWriteExpr", "InferredLatch"})},
+        {"n1: no default, every item disables the block, a write after the case", R"(
+module t;
+  logic [1:0] s; logic y; int i;
+  always_comb begin : b
+    unique case (s)
+      2'd0: begin y = 0; disable b; end
+      2'd1: begin y = 1; disable b; end
+    endcase
+    i = 1;
+  end
+  initial begin s = 3; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns", "InferredLatch", "InferredLatch"})},
+        {"n1f: a function, every item returns, no default, a write after the case", R"(
+module t;
+  logic [1:0] s; int i, y;
+  function automatic int f(logic [1:0] s);
+    unique case (s)
+      2'd0: return 1;
+      2'd1: return 2;
+    endcase
+    i = 1;
+    return 0;
+  endfunction
+  always_comb y = f(s);
+  initial begin s = 3; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns"})},
+        {"n1b: a loop body, every item breaks, no default, a write after the case", R"(
+module t;
+  logic [1:0] s; logic y; int i;
+  always_comb begin
+    y = 0;
+    for (int k = 0; k < 2; k++) begin
+      unique case (s)
+        2'd0: begin y = 1; break; end
+        2'd1: begin y = 0; break; end
+      endcase
+      i = k;
+    end
+  end
+  initial begin s = 3; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns", "InferredLatch"})},
+        {"pc1: a constant selector whose known branch is the default", R"(
+module t;
+  localparam logic [1:0] P = 2'd3;
+  logic y; int i;
+  always_comb begin
+    unique case (P)
+      2'd0: y = 1'b0;
+      2'd1: y = 1'b1;
+      default: y = 1'bx;
+    endcase
+    i = 1;
+  end
+  initial begin i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns"})},
+        {"pc3: every item disables the block, default: ;, a write after the case", R"(
+module t;
+  logic [1:0] s; logic y; int i;
+  always_comb begin : b
+    unique case (s)
+      2'd0: begin y = 0; disable b; end
+      2'd1: begin y = 1; disable b; end
+      default: y = 0;
+    endcase
+    i = 1;
+  end
+  initial begin s = 3; i = 0; end
+endmodule
+)",
+         {"t.i"},
+         sortedCodes({"MultipleAlwaysAssigns"}),
+         sortedCodes({"MultipleAlwaysAssigns", "InferredLatch"})},
+    };
+
+    for (auto& c : cases) {
+        INFO(c.name);
+        auto on = fcupRun(c.code, true, c.vars);
+        auto off = fcupRun(c.code, false, c.vars);
+        CHECK(on.codes == c.on);
+        CHECK(off.codes == c.off);
+        CHECK(on.drivers == off.drivers);
+        CHECK(on.stats.numFlowOnlyPasses >= 1);
+        CHECK(off.stats.numFlowOnlyPasses == 0);
+    }
+}
+
+TEST_CASE("SVMake K-2437: the joined-flow codes keep FullCaseUniquePriority's answer") {
+    // What the flag is for: a unique case whose items cover the values in use is not a latch, and a
+    // function whose items all return does not fall off its end. These stay as the flag gives them.
+    struct Case {
+        const char* name;
+        std::string code;
+        std::vector<std::string> on, off;
+    };
+    const Case cases[] = {
+        {"fc_latch: default: ;", R"(
+module t;
+  logic [1:0] s; logic a, y;
+  always_comb begin
+    unique case (s)
+      2'd0: y = a;
+      2'd1: y = ~a;
+      default: ;
+    endcase
+  end
+endmodule
+)",
+         {}, sortedCodes({"InferredLatch"})},
+        {"n2: every item returns, no default", R"(
+module t;
+  function automatic int f(logic [1:0] s);
+    unique case (s)
+      2'd0: return 1;
+      2'd1: return 2;
+    endcase
+  endfunction
+endmodule
+)",
+         {}, sortedCodes({"IncompleteReturn"})},
+        {"n3: every item returns, default: ;", R"(
+module t;
+  function automatic int f(logic [1:0] s);
+    unique case (s)
+      2'd0: return 1;
+      2'd1: return 2;
+      default: ;
+    endcase
+  endfunction
+endmodule
+)",
+         {}, sortedCodes({"IncompleteReturn"})},
+        {"n4: default: disable b;", R"(
+module t;
+  logic [1:0] s; logic y;
+  always_comb begin : b
+    unique case (s)
+      2'd0: y = 0;
+      2'd1: y = 1;
+      default: disable b;
+    endcase
+  end
+endmodule
+)",
+         {}, sortedCodes({"InferredLatch"})},
+        {"n5: a default-only error flag", R"(
+module t;
+  logic [1:0] s; logic y, err;
+  always_comb begin
+    unique case (s)
+      2'd0: y = 0;
+      2'd1: y = 1;
+      default: begin y = 'x; err = 1; end
+    endcase
+  end
+endmodule
+)",
+         {}, sortedCodes({"InferredLatch"})},
+        {"n6: default: break; in a loop", R"(
+module t;
+  logic [1:0] s; logic y;
+  always_comb begin
+    y = 0;
+    for (int k = 0; k < 4; k++) begin
+      unique case (s)
+        2'd0: y = 1;
+        2'd1: y = 0;
+        default: break;
+      endcase
+    end
+  end
+endmodule
+)",
+         {}, {}},
+    };
+
+    for (auto& c : cases) {
+        INFO(c.name);
+        CHECK(fcupRun(c.code, true, {}).codes == c.on);
+        CHECK(fcupRun(c.code, false, {}).codes == c.off);
+    }
+}
+
+TEST_CASE("SVMake K-2437: the flow-only pass runs only where FullCaseUniquePriority changes the flow") {
+    auto run = [](const std::string& code) { return fcupRun(code, true, {}).stats.numFlowOnlyPasses; };
+
+    // No unique or priority case.
+    CHECK(run(R"(
+module t; logic [1:0] s; logic y;
+  always_comb case (s) 2'd0: y = 0; default: y = 1; endcase
+endmodule
+)") == 0);
+
+    // A unique case proven to cover its (2-state) input: the flag changes nothing.
+    CHECK(run(R"(
+module t; bit [1:0] s; logic y; int i;
+  always_comb unique case (s) 2'd0, 2'd1: y = 0; 2'd2, 2'd3: y = 1; default: i = 1; endcase
+endmodule
+)") == 0);
+
+    // unique0 is not assumed full by the flag.
+    CHECK(run(R"(
+module t; logic [1:0] s; logic y;
+  always_comb unique0 case (s) 2'd0: y = 0; 2'd1: y = 1; endcase
+endmodule
+)") == 0);
+
+    // One procedure with an assumed case, one without.
+    CHECK(run(R"(
+module t; logic [1:0] s; logic y, z;
+  always_comb unique case (s) 2'd0: y = 0; 2'd1: y = 1; default: y = 0; endcase
+  always_comb z = s[0];
+endmodule
+)") == 1);
+}

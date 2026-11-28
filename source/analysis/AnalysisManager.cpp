@@ -323,6 +323,7 @@ AnalysisManager::Stats AnalysisManager::getStats() const {
     stats.memoryUsage += mapBytes(visitedNonProcCalls);
 
     stats.numScopes = analyzedScopes.size();
+    stats.numFlowOnlyPasses = numFlowOnlyPasses.load(std::memory_order_relaxed);
     stats.numProcedures = analyzedSubroutines.size();
 
     analyzedAssertions.visit_all([&](const auto& e) {
@@ -411,13 +412,47 @@ AnalyzedProcedure AnalysisManager::analyzeProcedure(AnalysisContext& context, co
     if (customDFAProvider)
         return customDFAProvider(context, symbol, parentProcedure);
 
-    DefaultDFA dfa(context, symbol, true);
-    dfa.run();
+    if (!options.flags.has(AnalysisFlags::FullCaseUniquePriority)) {
+        DefaultDFA dfa(context, symbol, true);
+        dfa.run();
 
+        if (dfa.bad)
+            return AnalyzedProcedure(symbol, parentProcedure);
+        else
+            return AnalyzedProcedure(context, symbol, parentProcedure, dfa);
+    }
+
+    // SVMake K-2437: FullCaseUniquePriority assumes a unique or priority case covers its
+    // input, which makes its default arm (or, with no default, the code after it when every
+    // item leaves) unreachable to the flow. An unreachable path records no references, so
+    // the drivers there were dropped: an always_comb whose default arm writes a variable
+    // another process writes (9.2.2.2), or an input port written there (23.3.3.2), was
+    // accepted silently. The flag is an optimisation hint about which arm runs, not a
+    // proof that an arm is dead (12.5: the default runs when no item matches).
+    //
+    // So the procedure is analysed with the flag cleared, and that pass gives every
+    // reference, driver and diagnostic. Only where the flag would change the flow is a
+    // second, flow-only pass run with it: no diagnostics, no manager calls, and its results
+    // are read solely for the checks derived from the joined flow state (latches, inferred
+    // combinational logic, missing or incomplete returns), which is what the flag is for.
+    auto referenceOptions = options;
+    referenceOptions.flags = referenceOptions.flags & ~bitmask<AnalysisFlags>(
+                                                         AnalysisFlags::FullCaseUniquePriority);
+
+    DefaultDFA dfa(context, symbol, true, referenceOptions, false);
+    dfa.run();
     if (dfa.bad)
         return AnalyzedProcedure(symbol, parentProcedure);
-    else
-        return AnalyzedProcedure(context, symbol, parentProcedure, dfa);
+
+    if (dfa.fcupWouldAssume) {
+        numFlowOnlyPasses.fetch_add(1, std::memory_order_relaxed);
+        DefaultDFA flow(context, symbol, false, options, true);
+        flow.run();
+        if (!flow.bad)
+            return AnalyzedProcedure(context, symbol, parentProcedure, dfa, &flow);
+    }
+
+    return AnalyzedProcedure(context, symbol, parentProcedure, dfa);
 }
 
 const AnalyzedProcedure& AnalysisManager::analyzeSubroutine(

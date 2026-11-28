@@ -7,6 +7,7 @@
 //------------------------------------------------------------------------------
 #pragma once
 
+#include <atomic>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -176,6 +177,10 @@ public:
 
         /// The number of scopes analyzed.
         size_t numScopes = 0;
+
+        /// The number of flow-only passes run: procedures analyzed a second time
+        /// because AnalysisFlags::FullCaseUniquePriority changes their flow (SVMake K-2437).
+        size_t numFlowOnlyPasses = 0;
     };
 
     /// Returns various statistics about the analysis.
@@ -258,6 +263,9 @@ private:
     concurrent_set<const ast::SubroutineSymbol*> visitedNonProcCalls;
 
     DriverTracker driverTracker;
+
+    // SVMake K-2437: see Stats::numFlowOnlyPasses.
+    std::atomic<size_t> numFlowOnlyPasses = 0;
 
     CustomDFAProvider customDFAProvider;
     std::vector<std::function<void(const AnalyzedProcedure&)>> procListeners;

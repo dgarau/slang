@@ -167,10 +167,16 @@ protected:
 
     /// Constructs a new DataFlowAnalysis object.
     DataFlowAnalysis(AnalysisContext& context, const Symbol& symbol, bool reportDiags) :
-        AFABase(symbol, context.manager->getOptions(),
-                reportDiags ? &context.diagnostics : nullptr),
+        DataFlowAnalysis(context, symbol, reportDiags, context.manager->getOptions(), false) {}
+
+    /// Constructs a new DataFlowAnalysis object with the given options. A flow-only
+    /// analysis (@a flowOnly) makes no calls back into the analysis manager, so it
+    /// can be run a second time over a procedure without analyzing anything twice.
+    DataFlowAnalysis(AnalysisContext& context, const Symbol& symbol, bool reportDiags,
+                     AnalysisOptions options, bool flowOnly) :
+        AFABase(symbol, options, reportDiags ? &context.diagnostics : nullptr),
         DFAResults(context, this->getState().assigned), context(context),
-        sequenceChecker(*this, reportDiags ? &context : nullptr) {}
+        sequenceChecker(*this, reportDiags ? &context : nullptr), flowOnly(flowOnly) {}
 
     template<typename T>
         requires(detail::IsSelectExpr<T>)
@@ -560,6 +566,9 @@ private:
     // Stack of @* timed statements currently being analyzed.
     SmallVector<const Statement*, 2> activeImplicitRegions;
 
+    // Set for a flow-only pass (see the constructor).
+    bool flowOnly = false;
+
     void visitLValue(const Expression& expr) {
         SLANG_ASSERT(!isLValue);
         isLValue = true;
@@ -606,7 +615,8 @@ private:
 
         // The timing expressions don't contribute to data flow but we still
         // want to analyze them for various correctness checks.
-        context.manager->analyzeNonProceduralExprs(timing, this->rootSymbol);
+        if (!flowOnly)
+            context.manager->analyzeNonProceduralExprs(timing, this->rootSymbol);
     }
 
     void noteReference(const ValuePath& path);
@@ -696,6 +706,10 @@ class SLANG_EXPORT DefaultDFA : public DataFlowAnalysis<DefaultDFA, DataFlowStat
 public:
     DefaultDFA(AnalysisContext& context, const Symbol& symbol, bool reportDiags) :
         DataFlowAnalysis(context, symbol, reportDiags) {}
+
+    DefaultDFA(AnalysisContext& context, const Symbol& symbol, bool reportDiags,
+               AnalysisOptions options, bool flowOnly) :
+        DataFlowAnalysis(context, symbol, reportDiags, options, flowOnly) {}
 };
 
 } // namespace slang::analysis
