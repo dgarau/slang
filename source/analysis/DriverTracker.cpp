@@ -232,9 +232,24 @@ std::optional<InstanceDriverState> DriverTracker::getInstanceState(
     return state;
 }
 
-static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
+// The (code, location) pairs already reported for one new driver (SVMake K-2450).
+using ReportedOverlaps = SmallVector<std::pair<DiagCode, SourceLocation>, 4>;
+
+// Returns true if this (code, location) was already reported for the new driver, and
+// records it otherwise. Checked before a diagnostic is built.
+static bool alreadyReported(ReportedOverlaps& reported, DiagCode code, SourceLocation loc) {
+    for (auto& [c, l] : reported) {
+        if (c == code && l == loc)
+            return true;
+    }
+    reported.emplace_back(code, loc);
+    return false;
+}
+
+static void handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
                           const ValueDriver* first, const ValueDriver* second, bool isNet,
-                          bool isUWire, bool isSingleDriverUDNT, const NetType* netType) {
+                          bool isUWire, bool isSingleDriverUDNT, const NetType* netType,
+                          ReportedOverlaps& reported) {
     // The default handling case for mixed vs multiple assignments is below.
     // First check for more specialized cases here:
     // 1. If this is a non-uwire net for an input or output port
@@ -259,34 +274,38 @@ static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
         if (second->isInputPort() || first->flags.has(DriverFlags::OutputPort))
             std::swap(first, second);
 
+        if (alreadyReported(reported, code, second->getSourceRange().start()))
+            return;
+
         auto& diag = context.addDiag(symbol, code, second->getSourceRange());
         diag << symbol.name;
 
         auto note = code == diag::OutputPortCoercion ? diag::NoteDrivenHere
                                                      : diag::NoteDeclarationHere;
         diag.addNote(note, first->getSourceRange());
-
-        // For variable ports this is an error, for nets it's a warning.
-        return isNet;
+        return;
     }
 
     if (first->isClockVar() || second->isClockVar()) {
         // Both drivers being clockvars is allowed.
         if (first->isClockVar() && second->isClockVar())
-            return true;
+            return;
 
         // Procedural drivers are allowed to clockvars.
         if (first->kind == DriverKind::Procedural || second->kind == DriverKind::Procedural)
-            return true;
+            return;
 
         // Otherwise we have an error.
         if (second->isClockVar())
             std::swap(first, second);
 
+        if (alreadyReported(reported, diag::ClockVarTargetAssign, second->getSourceRange().start()))
+            return;
+
         auto& diag = context.addDiag(symbol, diag::ClockVarTargetAssign, second->getSourceRange());
         diag << symbol.name;
         diag.addNote(diag::NoteReferencedHere, first->getSourceRange());
-        return false;
+        return;
     }
 
     const bool bothProcedural = first->kind == DriverKind::Procedural &&
@@ -310,6 +329,9 @@ static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
         std::swap(first, second);
 
     auto secondRange = second->getSourceRange();
+    if (alreadyReported(reported, code, secondRange.start()))
+        return;
+
     auto& diag = context.addDiag(symbol, code, secondRange);
 
     EvalContext evalCtx(symbol);
@@ -350,8 +372,6 @@ static bool handleOverlap(AnalysisContext& context, const ValueSymbol& symbol,
     }
 
     addOriginalNote(*first);
-
-    return false;
 }
 
 void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc,
@@ -471,6 +491,12 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
                 vd.path.lsp->type->isDynamicallySizedArray());
     };
 
+    // SVMake K-2450: every overlap with an earlier driver is a problem of its own (6.5: "it
+    // shall be an error to have multiple continuous assignments or a mixture of procedural and
+    // continuous assignments"), so the scan does not stop at the first one: a second continuous
+    // assignment behind a procedural writer was never reported. Each (code, reported location)
+    // is reported once per new driver, which is what the diagnostic map's coalescing shows anyway.
+    ReportedOverlaps reported;
     auto end = driverMap.end();
     for (auto it = driverMap.find(bounds); it != end; ++it) {
         // Check whether this pair of drivers overlapping constitutes a problem.
@@ -498,10 +524,8 @@ void DriverTracker::addDriver(AnalysisContext& context, DriverAlloc& driverAlloc
         }
 
         if (isProblem) {
-            if (!handleOverlap(context, symbol, curr, &driver, isNet, isUWire, isSingleDriverUDNT,
-                               netType)) {
-                break;
-            }
+            handleOverlap(context, symbol, curr, &driver, isNet, isUWire, isSingleDriverUDNT,
+                          netType, reported);
         }
     }
 

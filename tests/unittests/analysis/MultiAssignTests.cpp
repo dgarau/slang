@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "AnalysisTests.h"
+#include <set>
 
 TEST_CASE("Class method driver crash regress GH #552") {
     auto& code = R"(
@@ -1072,9 +1073,12 @@ endmodule
     AnalysisManager analysisManager;
 
     auto diags = analyze(code, compilation, analysisManager);
-    REQUIRE(diags.size() == 2);
-    CHECK(diags[0].code == diag::MixedVarAssigns);
-    CHECK(diags[1].code == diag::MultipleAlwaysAssigns);
+    // SVMake K-2450: the second always_comb overlaps both the continuous assignment and the first
+    // always_comb; both are reported (upstream expected 2: the scan stopped at the first).
+    REQUIRE(diags.size() == 3);
+    CHECK(std::ranges::count_if(diags, [](auto& d) { return d.code == diag::MixedVarAssigns; }) == 2);
+    CHECK(std::ranges::count_if(diags,
+                                [](auto& d) { return d.code == diag::MultipleAlwaysAssigns; }) == 1);
 }
 
 TEST_CASE("Multi assign from non-procedural contexts") {
@@ -1878,4 +1882,142 @@ endmodule
     CHECK(resolver("b") == &sumres);
     CHECK(resolver("c") == &sumres);
     CHECK(resolver("d") == nullptr);
+}
+
+namespace {
+
+// SVMake K-2450: the sorted "Code@line" list of a design's analysis diagnostics.
+std::vector<std::string> overlapDiags(const std::string& code) {
+    Compilation compilation;
+    AnalysisManager analysisManager;
+    auto diags = analyze(code, compilation, analysisManager);
+    std::vector<std::string> result;
+    for (auto& d : diags) {
+        result.push_back(fmt::format("{}@{}", toString(d.code),
+                                     compilation.getSourceManager()->getLineNumber(d.location)));
+    }
+    std::ranges::sort(result);
+    return result;
+}
+
+std::vector<std::string> sortedList(std::initializer_list<std::string> items) {
+    std::vector<std::string> v(items);
+    std::ranges::sort(v);
+    return v;
+}
+
+} // namespace
+
+TEST_CASE("SVMake K-2450: every overlap of a new driver is reported, once per code and location") {
+    // 6.5: "It shall be an error to have multiple continuous assignments or a mixture of procedural
+    // and continuous assignments writing to any term". The scan used to stop at the first problem
+    // per new driver, so a second continuous assignment behind a procedural writer went unreported.
+    // Lines count from 2 (the raw strings start with a newline).
+    CHECK(overlapDiags(R"(
+module t;
+  logic v;
+  assign v = 1'b1;
+  task k; v = 1'b0; endtask
+  assign v = 1'b0;
+endmodule
+)") == sortedList({"MixedVarAssigns@5", "MixedVarAssigns@6", "MultipleContAssigns@6"}));   // m1
+
+    CHECK(overlapDiags(R"(
+module t;
+  logic v;
+  assign v = 1'b1;
+  assign v = 1'b0;
+  task k; v = 1'b0; endtask
+endmodule
+)") == sortedList({"MultipleContAssigns@5", "MixedVarAssigns@6"}));   // m2: unchanged
+
+    CHECK(overlapDiags(R"(
+module t;
+  logic v;
+  assign v = 1;
+  initial v = 0;
+  assign v = 0;
+endmodule
+)") == sortedList({"MixedVarAssigns@5", "MixedVarAssigns@6", "MultipleContAssigns@6"}));   // m3 / d4
+
+    CHECK(overlapDiags(R"(
+module t;
+  logic v;
+  assign v = 1;
+  assign v = 0;
+  initial v = 0;
+endmodule
+)") == sortedList({"MultipleContAssigns@5", "MixedVarAssigns@6"}));   // d5: one location for both MVA
+
+    CHECK(overlapDiags(R"(
+module t;
+  logic v;
+  assign v = 1'b1;
+  assign v = 1'b0;
+  assign v = 1'bz;
+endmodule
+)") == sortedList({"MultipleContAssigns@5", "MultipleContAssigns@6"}));   // m4: unchanged
+
+    CHECK(overlapDiags(R"(
+module c(input var logic i);
+  assign i = 1'b0;
+  initial i = 1'b1;
+endmodule
+module t; logic a = 1; c u(.i(a)); endmodule
+)") == sortedList({"InputPortAssign@3", "InputPortAssign@4", "MixedVarAssigns@4"}));   // m5
+
+    // The reported location can be the EARLIER driver's (MultipleAlwaysAssigns outside a single
+    // driver procedure, ClockVarTargetAssign, InputPortAssign): both locations are reported.
+    CHECK(overlapDiags(R"(
+module t;
+  logic [1:0] x;
+  always_comb x[0] = 1;
+  always_comb x[1] = 1;
+  initial x = 0;
+endmodule
+)") == sortedList({"MultipleAlwaysAssigns@4", "MultipleAlwaysAssigns@5"}));   // d2
+
+    CHECK(overlapDiags(R"(
+module t;
+  logic [1:0] x;
+  initial x = 0;
+  always_comb x[0] = 1;
+  always_comb x[1] = 1;
+endmodule
+)") == sortedList({"MultipleAlwaysAssigns@5", "MultipleAlwaysAssigns@6"}));   // d1: unchanged
+
+    auto cv = overlapDiags(R"(
+module t;
+  logic clk, d;
+  clocking cb @(posedge clk); output d; endclocking
+  assign d = 1;
+  assign d = 0;
+endmodule
+)");
+    CHECK(std::ranges::count(cv, std::string("ClockVarTargetAssign@5")) == 1);
+    CHECK(std::ranges::count(cv, std::string("ClockVarTargetAssign@6")) == 1);
+    CHECK(std::ranges::count(cv, std::string("MultipleContAssigns@6")) == 1);
+}
+
+TEST_CASE("SVMake K-2450: the codes reported do not depend on the textual order of the drivers") {
+    auto codesOf = [](const std::vector<std::string>& stmts) {
+        std::string code = "module t;\n  logic v;\n";
+        for (auto& s : stmts)
+            code += "  " + s + "\n";
+        code += "endmodule\n";
+        std::set<std::string> codes;
+        for (auto& d : overlapDiags(code))
+            codes.insert(d.substr(0, d.find('@')));
+        return codes;
+    };
+    const std::set<std::string> both{"MixedVarAssigns", "MultipleContAssigns"};
+
+    for (auto third : {std::string("task k; v = 1'b0; endtask"), std::string("initial v = 1'b0;")}) {
+        std::vector<std::string> stmts{"assign v = 1'b1;", "assign v = 1'b0;", third};
+        std::ranges::sort(stmts);
+        do {
+            INFO(stmts[0] << " | " << stmts[1] << " | " << stmts[2]);
+            CHECK(codesOf(stmts) == both);
+        } while (std::ranges::next_permutation(stmts).found);
+    }
 }
